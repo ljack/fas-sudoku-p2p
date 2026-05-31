@@ -2,7 +2,14 @@
 
 FAS-Sudoku-App is a premium, web-based **Sudoku application** built on top of the build-time configured [FAS-Framework](https://github.com/ljack/fas-framework) and complying with the [Feature-Agent-Spec (FAS)](https://github.com/ljack/feature-agent-spec) architectural standard.
 
-This application is completely stateless, uses a PostgreSQL database to manage active boards, and includes an automated backtracking solver.
+This application is completely stateless, containerized, and uses a PostgreSQL database to manage active boards.
+
+### Key Features
+- **Stateless Cyber UI**: Glassmorphic, modern dark-mode responsive board with client-side conflicts checking.
+- **Backtracking Auto-Solver**: An automated solver running on the server that completes any puzzle dynamically.
+- **Live Co-Op Multiplayer**: Multiple players can access the same RESTful URL (no login required) to collaborate in real-time.
+- **Instant Play Syncing**: Peer moves propagate instantly over Server-Sent Events (SSE) and update cell inputs in-place, preserving focused elements and cursor highlights.
+- **Multiplayer Presence Panel**: A live overlay showing active players count, peer cursor highlights, and computed idle timeouts updated every 5 seconds.
 
 ---
 
