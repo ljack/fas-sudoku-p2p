@@ -42,3 +42,52 @@
     opacity: 1;
   }
 }
+
+/* Presence Widget Styling */
+.presence-panel {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 10px 15px;
+  margin-bottom: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-sizing: border-box;
+}
+
+.presence-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
+.presence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.presence-badge {
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4px 10px;
+  border-radius: 20px;
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.presence-badge.idle {
+  color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.03);
+}
+
+.presence-badge.self {
+  border-color: var(--accent-purple);
+  color: var(--accent-purple);
+}

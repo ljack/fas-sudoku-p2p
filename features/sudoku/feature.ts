@@ -130,7 +130,7 @@ export const sudokuFeature: FeatureModule = {
         
         // Dynamically inject leaderboard resources if enabled
         try {
-          const configJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../../config.json'), 'utf8'));
+          const configJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'config.json'), 'utf8'));
           if (configJson.features && configJson.features.leaderboard === true) {
             injectStr += `
   <link rel="stylesheet" href="/leaderboard-client/inject.css">

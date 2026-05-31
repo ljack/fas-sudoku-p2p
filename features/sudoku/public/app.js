@@ -36,10 +36,38 @@ async function init() {
 
 // Render the 9x9 grid cells
 function renderBoard() {
-  gridContainer.innerHTML = '';
   const currentArray = currentGrid.split('').map(Number);
   const conflicts = getConflicts(currentArray);
+  const cells = gridContainer.querySelectorAll('.cell');
 
+  if (cells.length === 81) {
+    // In-place updates to keep focus and cursor position
+    for (let i = 0; i < 81; i++) {
+      const cell = cells[i];
+      const initialVal = initialGrid[i];
+      const currentVal = currentGrid[i];
+
+      if (initialVal === '0') {
+        const input = cell.querySelector('input');
+        if (input) {
+          const expectedVal = currentVal === '0' ? '' : currentVal;
+          if (document.activeElement !== input && input.value !== expectedVal) {
+            input.value = expectedVal;
+          }
+        }
+      }
+
+      if (conflicts.has(i)) {
+        cell.classList.add('conflict');
+      } else {
+        cell.classList.remove('conflict');
+      }
+    }
+    return;
+  }
+
+  // Fallback: Full Board Reconstruction
+  gridContainer.innerHTML = '';
   for (let i = 0; i < 81; i++) {
     const cell = document.createElement('div');
     cell.className = 'cell';

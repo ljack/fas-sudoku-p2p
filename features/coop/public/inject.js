@@ -22,7 +22,7 @@
 
   // 2. Establish Server-Sent Events stream
   function connectStream() {
-    eventSource = new EventSource(`/api/sudoku/${gameId}/coop-stream`);
+    eventSource = new EventSource(`/api/sudoku/${gameId}/coop-stream?playerId=${playerId}&nickname=${encodeURIComponent(myNickname)}&t=${Date.now()}`);
 
     eventSource.onmessage = (event) => {
       try {
@@ -49,6 +49,10 @@
               handlePeerFocus(data);
             }
             break;
+
+          case 'presence':
+            renderPresencePanel(data.players);
+            break;
             
           default:
             break;
@@ -63,6 +67,53 @@
       eventSource.close();
       setTimeout(connectStream, 3000);
     };
+  }
+
+  // Render active players and their idle timeouts
+  function renderPresencePanel(players) {
+    let panel = document.getElementById('presence-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'presence-panel';
+      panel.className = 'presence-panel';
+      const appCard = document.querySelector('.app-card');
+      const sudokuGrid = document.getElementById('sudoku-grid');
+      if (appCard && sudokuGrid) {
+        appCard.insertBefore(panel, sudokuGrid);
+      }
+    }
+
+    panel.innerHTML = '';
+    
+    const countSpan = document.createElement('span');
+    countSpan.className = 'presence-count';
+    countSpan.textContent = `👥 ${players.length} player${players.length > 1 ? 's' : ''} online`;
+    panel.appendChild(countSpan);
+
+    const listDiv = document.createElement('div');
+    listDiv.className = 'presence-list';
+
+    players.forEach(p => {
+      const badge = document.createElement('span');
+      badge.className = 'presence-badge';
+      
+      let text = p.nickname;
+      if (p.playerId === playerId) {
+        text += ' (you)';
+        badge.classList.add('self');
+      }
+
+      if (p.idleSeconds > 10) {
+        badge.classList.add('idle');
+        badge.textContent = `${text} (idle ${p.idleSeconds}s)`;
+      } else {
+        badge.textContent = `${text} (active)`;
+      }
+
+      listDiv.appendChild(badge);
+    });
+
+    panel.appendChild(listDiv);
   }
 
   // 3. Render peer focus outlines and name tags
@@ -145,7 +196,15 @@
     }
   }
 
+  // Heartbeat to keep connection alive and update activity timestamp
+  function startHeartbeat() {
+    setInterval(() => {
+      sendFocusUpdate(-2); // Special value -2 indicates heartbeat / keep-active
+    }, 10000);
+  }
+
   // Boot
   connectStream();
   setupInputDelegation();
+  startHeartbeat();
 })();
