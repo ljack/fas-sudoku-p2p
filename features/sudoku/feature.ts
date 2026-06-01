@@ -112,7 +112,7 @@ export const sudokuFeature: FeatureModule = {
            VALUES ($1, $2, $3, $4, $5)`,
           [gameId, randomPuzzle, randomPuzzle, solutionStr, 'active']
         );
-        res.redirect(`/sudoku/${gameId}`);
+        res.redirect(`/sudoku/${gameId}?role=host`);
       } catch (err: any) {
         console.error('[Sudoku] Create failed on redirect:', err.message);
         res.status(500).send("Database initialization error.");

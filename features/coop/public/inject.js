@@ -1,210 +1,421 @@
 (function() {
-  console.log('[FAS Plugin] Injecting Live Co-Op Multiplayer feature...');
+  const oldLog = console.log;
+  console.log = function(...args) {
+    oldLog.apply(console, args);
+    const msg = args.join(' ');
+    const logs = document.getElementById('diagnostic-logs');
+    if (logs) {
+      logs.textContent += `\n[P2P] ${msg}`;
+      logs.scrollTop = logs.scrollHeight;
+    }
+  };
+  const oldWarn = console.warn;
+  console.warn = function(...args) {
+    oldWarn.apply(console, args);
+    const msg = args.join(' ');
+    const logs = document.getElementById('diagnostic-logs');
+    if (logs) {
+      logs.textContent += `\n[P2P Warning] ${msg}`;
+      logs.scrollTop = logs.scrollHeight;
+    }
+  };
 
-  const gameId = window.location.pathname.split('/').pop();
-  
-  // 1. Generate local player metadata
-  const playerId = 'player_' + Math.random().toString(36).substring(2, 9);
+  console.log('[FAS Plugin] Injecting 1-Way Manual WebRTC P2P Engine...');
+
+  // 1. Establish player identity
   const colorList = [
-    'hsl(140, 80%, 65%)', // Green
-    'hsl(330, 85%, 70%)', // Pink
-    'hsl(40, 95%, 60%)',  // Orange
+    'hsl(140, 80%, 65%)', // Emerald Green
+    'hsl(330, 85%, 70%)', // Neon Pink
+    'hsl(40, 95%, 60%)',  // Sun Gold
     'hsl(200, 90%, 65%)', // Sky Blue
-    'hsl(270, 90%, 70%)'  // Purple
+    'hsl(270, 90%, 70%)'  // Electric Purple
   ];
   const myColor = colorList[Math.floor(Math.random() * colorList.length)];
-  const nameList = ['Astro Solver', 'Cosmic Solver', 'Star Solv', 'Nebula Brain', 'Gravity Zero', 'Galaxy Brain'];
+  const nameList = ['Solar Solver', 'Quantum Solver', 'P2P Brain', 'IPv6 Voyager', 'Gravity Solver', 'Grid Titan'];
   const myNickname = nameList[Math.floor(Math.random() * nameList.length)] + ' #' + Math.floor(Math.random() * 900 + 100);
 
-  console.log(`[Co-Op] Registered as: ${myNickname} (${playerId}) with color ${myColor}`);
-
-  let eventSource = null;
-
-  // 2. Establish Server-Sent Events stream
-  function connectStream() {
-    eventSource = new EventSource(`/api/sudoku/${gameId}/coop-stream?playerId=${playerId}&nickname=${encodeURIComponent(myNickname)}&t=${Date.now()}`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        switch (data.type) {
-          case 'move':
-            console.log('[Co-Op] Received external move update');
-            // Dispatch dynamic window event to sync parent grid
-            window.dispatchEvent(new CustomEvent('sudoku:externalMove', {
-              detail: { grid: data.grid, status: data.status }
-            }));
-            break;
-
-          case 'solve':
-            console.log('[Co-Op] Received external solve trigger');
-            window.dispatchEvent(new CustomEvent('sudoku:externalSolve', {
-              detail: { grid: data.grid, status: data.status }
-            }));
-            break;
-
-          case 'focus':
-            if (data.playerId !== playerId) {
-              handlePeerFocus(data);
-            }
-            break;
-
-          case 'presence':
-            renderPresencePanel(data.players);
-            break;
-            
-          default:
-            break;
-        }
-      } catch (err) {
-        console.error('[Co-Op] Error parsing SSE payload:', err);
-      }
-    };
-
-    eventSource.onerror = (e) => {
-      console.warn('[Co-Op] Stream disconnected, attempting reconnect...', e);
-      eventSource.close();
-      setTimeout(connectStream, 3000);
-    };
-  }
-
-  // Render active players and their idle timeouts
-  function renderPresencePanel(players) {
-    let panel = document.getElementById('presence-panel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'presence-panel';
-      panel.className = 'presence-panel';
-      const appCard = document.querySelector('.app-card');
-      const sudokuGrid = document.getElementById('sudoku-grid');
-      if (appCard && sudokuGrid) {
-        appCard.insertBefore(panel, sudokuGrid);
-      }
-    }
-
-    panel.innerHTML = '';
-    
-    const countSpan = document.createElement('span');
-    countSpan.className = 'presence-count';
-    countSpan.textContent = `👥 ${players.length} player${players.length > 1 ? 's' : ''} online`;
-    panel.appendChild(countSpan);
-
-    const listDiv = document.createElement('div');
-    listDiv.className = 'presence-list';
-
-    players.forEach(p => {
-      const badge = document.createElement('span');
-      badge.className = 'presence-badge';
-      
-      let text = p.nickname;
-      if (p.playerId === playerId) {
-        text += ' (you)';
-        badge.classList.add('self');
-      }
-
-      if (p.idleSeconds > 10) {
-        badge.classList.add('idle');
-        badge.textContent = `${text} (idle ${p.idleSeconds}s)`;
-      } else {
-        badge.textContent = `${text} (active)`;
-      }
-
-      listDiv.appendChild(badge);
-    });
-
-    panel.appendChild(listDiv);
-  }
-
-  // 3. Render peer focus outlines and name tags
-  function handlePeerFocus(data) {
-    // Remove any existing outlines/tags for this player
-    document.querySelectorAll(`.peer-highlight-${data.playerId}`).forEach(el => el.remove());
-    
-    if (data.cellIndex === -1) {
-      return; // Player blurred / left cell
-    }
-
-    const cells = document.querySelectorAll('#sudoku-grid .cell');
-    const targetCell = cells[data.cellIndex];
-    if (targetCell) {
-      // Create glowing border highlight
-      const outline = document.createElement('div');
-      outline.className = `peer-focus-outline peer-highlight-${data.playerId}`;
-      outline.style.borderColor = data.color;
-      outline.style.boxShadow = `0 0 8px ${data.color}`;
-      
-      // Create name tag bubble
-      const tag = document.createElement('span');
-      tag.className = `peer-focus-tag peer-highlight-${data.playerId}`;
-      tag.style.backgroundColor = data.color;
-      tag.textContent = data.nickname;
-      
-      outline.appendChild(tag);
-      targetCell.appendChild(outline);
-    }
-  }
-
-  // 4. Capture input focus changes using event delegation on the grid container
-  function setupInputDelegation() {
-    const gridContainer = document.getElementById('sudoku-grid');
-    if (!gridContainer) {
-      setTimeout(setupInputDelegation, 100);
-      return;
-    }
-
-    // Helper to find input index
-    function getCellIndex(inputElement) {
-      const cell = inputElement.closest('.cell');
-      const cells = Array.from(document.querySelectorAll('#sudoku-grid .cell'));
-      return cells.indexOf(cell);
-    }
-
-    // Input Focus Listener
-    gridContainer.addEventListener('focusin', (e) => {
-      if (e.target.tagName === 'INPUT') {
-        const cellIndex = getCellIndex(e.target);
-        if (cellIndex !== -1) {
-          sendFocusUpdate(cellIndex);
-        }
+  // 2. Parse URL hash to determine role and game configuration
+  function parseHash() {
+    const hash = window.location.hash.substring(1);
+    if (!hash) return {};
+    const params = {};
+    hash.split('&').forEach(pair => {
+      const [key, val] = pair.split('=');
+      if (key && val) {
+        params[key] = decodeURIComponent(val);
       }
     });
-
-    // Input Blur Listener
-    gridContainer.addEventListener('focusout', (e) => {
-      if (e.target.tagName === 'INPUT') {
-        sendFocusUpdate(-1); // -1 represents blur state
-      }
-    });
+    return params;
   }
 
-  // Post focus state to backend
-  async function sendFocusUpdate(cellIndex) {
+  const hashParams = parseHash();
+  const hasOfferInHash = !!hashParams.offer;
+  
+  // If hash contains an offer, this peer is a Client. If not, this peer is the Host.
+  const isHost = !hasOfferInHash;
+  const gameId = hashParams.gameId || 'game_' + Math.random().toString(36).substring(2, 9);
+  const myPeerId = isHost ? 'host' : 'client_' + Math.random().toString(36).substring(2, 9);
+  
+  console.log(`[P2P Profile] Peer ID: ${myPeerId} (${isHost ? 'Host' : 'Client'}), Nickname: ${myNickname}`);
+
+  // 3. WebRTC Configuration (Using public Google STUN for ICE gathering)
+  const config = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  };
+
+  let p2pStatus = 'disconnected'; // 'disconnected', 'gathering', 'handshaking', 'connected'
+  let pc = null;
+  let dc = null;
+  let discoveredIPs = new Set();
+  let activePlayers = [];
+
+  // Update connection status in UI console
+  function updateUIStatus(statusText, extra = '') {
+    p2pStatus = statusText;
+    const ipList = Array.from(discoveredIPs).filter(ip => ip.includes(':') || ip.split('.').length === 4);
+    const hasIPv6 = ipList.some(ip => ip.includes(':'));
+
+    window.dispatchEvent(new CustomEvent('sudoku:p2pStatus', {
+      detail: {
+        status: p2pStatus,
+        mode: 'manual',
+        isHost,
+        peerId: myPeerId,
+        nickname: myNickname,
+        color: myColor,
+        hasIPv6,
+        ips: ipList,
+        players: activePlayers,
+        extra
+      }
+    }));
+  }
+
+  // Extract IP addresses from candidates (especially looking for public IPv6 routes)
+  function inspectCandidate(candidateString) {
+    if (!candidateString) return;
     try {
-      await fetch(`/api/sudoku/${gameId}/focus`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cellIndex,
-          playerId,
-          color: myColor,
-          nickname: myNickname
-        })
-      });
+      const parts = candidateString.split(' ');
+      if (parts.length > 4) {
+        const ip = parts[4];
+        if (ip && !ip.endsWith('.local') && ip !== '0.0.0.0' && ip !== '127.0.0.1') {
+          discoveredIPs.add(ip);
+          updateUIStatus(p2pStatus);
+        }
+      }
     } catch (e) {
-      console.warn('[Co-Op] Failed to sync focus state:', e.message);
+      console.warn('Error parsing candidate IP:', e);
     }
   }
 
-  // Heartbeat to keep connection alive and update activity timestamp
-  function startHeartbeat() {
-    setInterval(() => {
-      sendFocusUpdate(-2); // Special value -2 indicates heartbeat / keep-active
-    }, 10000);
+  // 4. Initialize WebRTC peer connection
+  async function setupWebRTC() {
+    pc = new RTCPeerConnection(config);
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        inspectCandidate(event.candidate.candidate);
+      }
+    };
+
+    pc.onicegatheringstatechange = () => {
+      console.log(`[ICE Gathering] State changed to: ${pc.iceGatheringState}`);
+      if (pc.iceGatheringState === 'complete') {
+        onIceGatheringComplete();
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log(`[P2P Connection] State: ${pc.connectionState}`);
+      if (pc.connectionState === 'connected') {
+        updateUIStatus('connected');
+        console.log('[P2P Connection] Direct DTLS/SCTP link established!');
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        cleanup();
+      }
+    };
+
+    if (isHost) {
+      // 5. Host flow: Create and own the data channel
+      console.log('[P2P Setup] Host initializing peer connection...');
+      dc = pc.createDataChannel('game-data', { negotiated: false });
+      setupDataChannelListeners(dc, 'client');
+      
+      updateUIStatus('gathering');
+      
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      console.log('[P2P Setup] Offer SDP generated. Gathering ICE paths...');
+    } else {
+      // 6. Client flow: Consume offer and wait for Host data channel
+      console.log('[P2P Setup] Client initializing peer connection from URL Offer...');
+      pc.ondatachannel = (event) => {
+        console.log('[P2P Connection] Received data channel from Host.');
+        dc = event.channel;
+        setupDataChannelListeners(dc, 'host');
+      };
+
+      try {
+        const hostOffer = JSON.parse(atob(hashParams.offer));
+        await pc.setRemoteDescription(new RTCSessionDescription(hostOffer));
+        console.log('[P2P Setup] Applied Host remote description from URL.');
+        
+        updateUIStatus('gathering');
+        
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log('[P2P Setup] Answer SDP generated. Gathering ICE paths...');
+      } catch (err) {
+        console.error('[P2P Setup] Failed to parse offer SDP in URL hash:', err);
+        updateUIStatus('disconnected', 'Corrupted or expired URL Offer token.');
+      }
+    }
   }
 
-  // Boot
-  connectStream();
-  setupInputDelegation();
-  startHeartbeat();
+  // 7. Triggered when ICE gathering is finished (Vanilla ICE)
+  function onIceGatheringComplete() {
+    const localSDP = pc.localDescription;
+    const sdpToken = btoa(JSON.stringify(localSDP));
+
+    if (isHost) {
+      // Host generates the shareable game URL containing the offer token
+      const grid = window.sudokuInitialGrid || hashParams.grid || '';
+      const shareURL = `${window.location.origin}${window.location.pathname}#gameId=${gameId}&grid=${grid}&offer=${sdpToken}`;
+      
+      window.dispatchEvent(new CustomEvent('sudoku:manualOfferReady', {
+        detail: { shareURL }
+      }));
+      updateUIStatus('handshaking', 'Shareable URL generated. Awaiting client answer...');
+    } else {
+      // Client generates its answer token to be pasted back on the Host
+      window.dispatchEvent(new CustomEvent('sudoku:manualAnswerReady', {
+        detail: { token: sdpToken }
+      }));
+      updateUIStatus('handshaking', 'Answer token generated. Send it to the Host.');
+    }
+  }
+
+  // 8. Host applies the client's answer token to finish the connection
+  async function applyClientAnswer(token) {
+    if (!isHost || !pc) return;
+    try {
+      console.log('[P2P Connection] Applying Client answer token...');
+      const clientAnswer = JSON.parse(atob(token));
+      await pc.setRemoteDescription(new RTCSessionDescription(clientAnswer));
+      console.log('[P2P Connection] Client answer applied. Connecting...');
+      updateUIStatus('connecting');
+    } catch (err) {
+      console.error('[P2P Connection] Failed to parse remote answer token:', err);
+      alert('Failed to parse answer token. Ensure you copied the entire text.');
+    }
+  }
+
+  // 9. Data Channel Setup & Message Routing
+  function setupDataChannelListeners(channel, targetPeerId) {
+    channel.onopen = () => {
+      console.log(`[P2P Link] Channel open with ${targetPeerId}`);
+      sendDirectMessage(channel, {
+        type: 'intro',
+        nickname: myNickname,
+        color: myColor,
+        isHost
+      });
+
+      if (isHost) {
+        // Sync board state to client
+        window.dispatchEvent(new CustomEvent('sudoku:requestStateSync', {
+          detail: { recipientId: targetPeerId }
+        }));
+      }
+      updateActivePlayers();
+      updateUIStatus('connected');
+    };
+
+    channel.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type !== 'heartbeat') {
+          console.log(`[P2P Receive] Type: ${msg.type}`);
+        }
+        handleDataMessage(targetPeerId, msg);
+      } catch (err) {
+        console.error('[P2P Link] Parse error:', err);
+      }
+    };
+
+    channel.onclose = () => {
+      console.log(`[P2P Link] Channel closed with ${targetPeerId}`);
+      cleanup();
+    };
+  }
+
+  function handleDataMessage(senderId, msg) {
+    switch (msg.type) {
+      case 'intro':
+        activePlayers = [{
+          playerId: myPeerId,
+          nickname: myNickname,
+          color: myColor,
+          isHost
+        }, {
+          playerId: senderId,
+          nickname: msg.nickname,
+          color: msg.color,
+          isHost: msg.isHost
+        }];
+        updateUIStatus(p2pStatus);
+        break;
+
+      case 'state-sync':
+        if (!isHost) {
+          console.log('[P2P Client] Synchronizing board from Host');
+          window.dispatchEvent(new CustomEvent('sudoku:syncState', {
+            detail: {
+              initialGrid: msg.initialGrid,
+              currentGrid: msg.currentGrid,
+              status: msg.status
+            }
+          }));
+        }
+        break;
+
+      case 'move':
+        if (isHost) {
+          console.log(`[P2P Host] Validating move from client: Cell ${msg.cellIndex} -> ${msg.value}`);
+          window.dispatchEvent(new CustomEvent('sudoku:localMove', {
+            detail: { cellIndex: msg.cellIndex, value: msg.value, isExternal: true, senderId }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('sudoku:externalMove', {
+            detail: { grid: msg.grid, status: msg.status }
+          }));
+        }
+        break;
+
+      case 'solve':
+        if (isHost) {
+          window.dispatchEvent(new CustomEvent('sudoku:localSolve', { detail: { senderId } }));
+        } else {
+          window.dispatchEvent(new CustomEvent('sudoku:externalSolve', {
+            detail: { grid: msg.grid, status: msg.status }
+          }));
+        }
+        break;
+
+      case 'focus':
+        window.dispatchEvent(new CustomEvent('sudoku:externalFocus', {
+          detail: {
+            cellIndex: msg.cellIndex,
+            playerId: senderId,
+            color: msg.color,
+            nickname: msg.nickname
+          }
+        }));
+        break;
+
+      case 'heartbeat':
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // 10. Send Helpers
+  function sendDirectMessage(channel, payload) {
+    if (channel && channel.readyState === 'open') {
+      try {
+        if (payload.type !== 'heartbeat') {
+          console.log(`[P2P Send] Type: ${payload.type}`);
+        }
+        channel.send(JSON.stringify(payload));
+      } catch (e) {
+        console.error('[P2P Send] Write error:', e);
+      }
+    }
+  }
+
+  function broadcastMessage(payload) {
+    if (dc) {
+      sendDirectMessage(dc, payload);
+    }
+  }
+
+  function updateActivePlayers() {
+    activePlayers = [{
+      playerId: myPeerId,
+      nickname: myNickname,
+      color: myColor,
+      isHost
+    }];
+  }
+
+  // Periodic Keep-alives
+  setInterval(() => {
+    broadcastMessage({ type: 'heartbeat' });
+  }, 5000);
+
+  function cleanup() {
+    console.log('[P2P Connection] Cleaning up local links...');
+    if (dc) { dc.close(); dc = null; }
+    if (pc) { pc.close(); pc = null; }
+    document.querySelectorAll('[class^="peer-highlight-"]').forEach(el => el.remove());
+    updateUIStatus('disconnected');
+  }
+
+  // 11. Binds triggers from sudoku app.js
+  window.addEventListener('sudoku:p2pSendMove', (e) => {
+    broadcastMessage({
+      type: 'move',
+      cellIndex: e.detail.cellIndex,
+      value: e.detail.value,
+      grid: e.detail.grid,
+      status: e.detail.status
+    });
+  });
+
+  window.addEventListener('sudoku:p2pSendSolve', (e) => {
+    broadcastMessage({
+      type: 'solve',
+      grid: e.detail.grid,
+      status: e.detail.status
+    });
+  });
+
+  window.addEventListener('sudoku:p2pSendFocus', (e) => {
+    broadcastMessage({
+      type: 'focus',
+      cellIndex: e.detail.cellIndex,
+      color: myColor,
+      nickname: myNickname
+    });
+  });
+
+  window.addEventListener('sudoku:p2pSyncRequested', (e) => {
+    sendDirectMessage(dc, {
+      type: 'state-sync',
+      initialGrid: e.detail.initialGrid,
+      currentGrid: e.detail.currentGrid,
+      status: e.detail.status
+    });
+  });
+
+  window.addEventListener('sudoku:submitManualToken', (e) => {
+    applyClientAnswer(e.detail.token);
+  });
+
+  window.addEventListener('sudoku:triggerManualOffer', () => {
+    setupWebRTC();
+  });
+
+  // Automatically start gathering on load if we have a hash offer (Client flow)
+  if (hasOfferInHash) {
+    console.log('[P2P Setup] Offer found in URL hash. Starting Client setup...');
+    // Give app.js a fraction of a second to bind its event listeners first
+    setTimeout(setupWebRTC, 100);
+  } else {
+    // Host waits for the user to click "Generate Offer URL" or we can start automatically
+    console.log('[P2P Setup] Ready to host. Click "Generate Connection Link" to begin.');
+  }
+
 })();

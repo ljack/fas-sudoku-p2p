@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Premium Cosmic Sudoku</title>
+  <title>Premium Cosmic Sudoku P2P</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/sudoku-client/styles.css">
   <!-- FAS_INJECT -->
+  <script src="/sudoku-client/qrcode.min.js"></script>
 </head>
 <body>
   <div class="stars-bg"></div>
@@ -17,8 +18,8 @@
 
   <div class="container">
     <header>
-      <h1>COSMIC <span class="accent-text">SUDOKU</span></h1>
-      <p class="subtitle">A stateless, zero-remnant FAS demonstration game</p>
+      <h1>COSMIC <span class="accent-text">SUDOKU P2P</span></h1>
+      <p class="subtitle">A database-less peer-to-peer multiplayer demonstration game</p>
     </header>
 
     <main class="app-card">
@@ -32,14 +33,97 @@
       </div>
 
       <div class="controls-panel">
-        <button class="btn btn-secondary" id="btn-reset">Reset</button>
-        <button class="btn btn-primary" id="btn-new">New Game</button>
+        <button class="btn btn-secondary" id="btn-reset">Reset Board</button>
+        <button class="btn btn-primary" id="btn-new">New Board</button>
         <button class="btn btn-accent animate-pulse" id="btn-solve">Solve Game</button>
       </div>
     </main>
 
+    <!-- P2P Connection Console -->
+    <section class="app-card p2p-card" style="margin-top: 20px; width: 100%;">
+      <div class="p2p-header" style="width: 100%; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 15px;">
+        <h2 class="p2p-title" style="font-size: 1.1rem; font-weight: 800; letter-spacing: 1px; margin: 0;">
+          <span class="accent-text">P2P CONNECTION</span> CONSOLE
+        </h2>
+        <div class="p2p-indicator-group" style="display: flex; align-items: center; gap: 8px;">
+          <span id="p2p-indicator-dot" class="indicator-dot red-glow" style="width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+          <span id="p2p-status-badge" class="badge">Offline</span>
+        </div>
+      </div>
+
+      <!-- Security Disclosure -->
+      <div class="p2p-disclosure" style="width: 100%; font-size: 0.75rem; color: var(--text-muted); background: rgba(255, 170, 0, 0.04); border: 1px solid rgba(255, 170, 0, 0.15); padding: 8px 12px; border-radius: 8px; margin-bottom: 15px; line-height: 1.4;">
+        ⚠️ <strong>P2P Address Sharing Warning:</strong> Establishing a direct peer connection shares your network address (including public IPv6 / IPv4 addresses) with other players. Connections are end-to-end encrypted (DTLS/SRTP) and bypass database servers.
+      </div>
+
+      <div class="p2p-control-grid" style="width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px;">
+        <!-- Player Identity & IP Discovery -->
+        <div class="p2p-console-section" style="display: flex; flex-direction: column; gap: 10px;">
+          <h3 style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Your Profile</h3>
+          <div class="profile-info" style="display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.03); padding: 8px 12px; border-radius: 10px; border: 1px solid var(--glass-border);">
+            <span class="profile-color-dot" id="profile-color" style="width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: #fff;"></span>
+            <span class="profile-name" id="profile-nickname" style="font-size: 0.9rem; font-weight: 600;">...</span>
+            <span class="profile-role" id="profile-role" style="font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.08); text-transform: uppercase;">...</span>
+          </div>
+
+          <h3 style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 10px;">Network Interfaces (IPs)</h3>
+          <div class="network-info" style="background: rgba(255, 255, 255, 0.03); padding: 10px; border-radius: 10px; border: 1px solid var(--glass-border); display: flex; flex-direction: column; gap: 6px;">
+            <span class="network-type" id="network-type-badge" style="font-size: 0.75rem; font-weight: 700; align-self: flex-start; padding: 2px 8px; border-radius: 20px; background: rgba(255,255,255,0.05); color: var(--text-muted);">Scanning...</span>
+            <div class="ip-list" id="discovered-ips" style="font-family: monospace; font-size: 0.75rem; line-height: 1.4; color: var(--text-muted); word-break: break-all;">
+              Awaiting connection setup...
+            </div>
+          </div>
+        </div>
+
+        <!-- Connection Mode Toggle -->
+        <div class="p2p-console-section" style="display: flex; flex-direction: column; gap: 10px;">
+          <h3 style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Signaling Channel</h3>
+          <div class="toggle-buttons" style="display: flex; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 10px; border: 1px solid var(--glass-border);">
+            <button class="toggle-btn active" id="btn-mode-auto" style="flex: 1; border: none; background: transparent; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; padding: 6px; border-radius: 6px; cursor: pointer; transition: all 0.2s;">Auto (SSE)</button>
+            <button class="toggle-btn" id="btn-mode-manual" style="flex: 1; border: none; background: transparent; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; padding: 6px; border-radius: 6px; cursor: pointer; transition: all 0.2s;">Manual (Token)</button>
+          </div>
+          <div class="mode-description" id="mode-desc" style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; padding: 5px;">
+            Uses the local node server to automatically exchange WebRTC coordinates. Perfect for standard setups.
+          </div>
+        </div>
+      </div>
+
+      <!-- Manual Connection Area -->
+      <div class="manual-signaling-panel hidden" id="manual-panel" style="width: 100%; border-top: 1px solid var(--glass-border); padding-top: 15px; margin-top: 5px; margin-bottom: 15px;">
+        <div class="manual-split" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div class="manual-column" id="manual-col-left" style="display: flex; flex-direction: column; gap: 8px;">
+            <h4 id="left-title" style="font-size: 0.8rem; font-weight: 600;">1. Generate Offer Token</h4>
+            <p id="left-desc" style="font-size: 0.7rem; color: var(--text-muted); margin: 0;">Click to create your local connection description and copy the generated token.</p>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn btn-secondary btn-small" id="btn-manual-offer">Generate Token</button>
+              <button class="btn btn-primary btn-small hidden" id="btn-copy-local">Copy to Clipboard</button>
+            </div>
+            <textarea id="local-sdp-text" readonly placeholder="Connection Token will appear here..." style="width: 100%; height: 80px; font-family: monospace; font-size: 0.65rem; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 6px; padding: 6px; color: var(--text-main); resize: none; outline: none; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);" onclick="this.select()"></textarea>
+            <div id="qrcode-container" class="hidden" style="margin-top: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+              <div id="qrcode" style="padding: 10px; background: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); display: inline-block;"></div>
+              <span style="font-size: 0.65rem; color: var(--text-muted);">Scan with your phone to join instantly</span>
+            </div>
+          </div>
+          <div class="manual-column" id="manual-col-right" style="display: flex; flex-direction: column; gap: 8px;">
+            <h4 id="right-title" style="font-size: 0.8rem; font-weight: 600;">2. Apply Remote Token</h4>
+            <p id="right-desc" style="font-size: 0.7rem; color: var(--text-muted); margin: 0;">Paste the connection token from the other player below to establish the connection.</p>
+            <textarea id="remote-sdp-text" placeholder="Paste remote connection token here..." style="width: 100%; height: 80px; font-family: monospace; font-size: 0.65rem; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 6px; padding: 6px; color: var(--text-main); resize: none; outline: none; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"></textarea>
+            <button class="btn btn-primary" id="btn-manual-connect" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 8px; align-self: flex-start;">Connect to Peer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Diagnostics Event Log -->
+      <div class="diagnostics-panel" style="width: 100%; border-top: 1px solid var(--glass-border); padding-top: 15px; margin-top: 5px;">
+        <h3 style="font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Signaling & ICE Event Logs</h3>
+        <div class="log-box" id="diagnostic-logs" style="width: 100%; height: 90px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 8px; font-family: monospace; font-size: 0.7rem; padding: 8px; overflow-y: auto; color: hsl(180, 80%, 75%); line-height: 1.5; white-space: pre-wrap; box-shadow: inset 0 2px 5px rgba(0,0,0,0.3);">
+[System] P2P engine initialized. Awaiting signaling connection...
+        </div>
+      </div>
+    </section>
+
     <footer>
-      <p>Share this restful URL with friends to play or view together</p>
+      <p>Share this Restful URL with your peers to play together globally.</p>
     </footer>
   </div>
 

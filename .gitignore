@@ -6,3 +6,5 @@ postgres_data/
 package-lock.json
 security_reports/
 .DS_Store
+dist-static/
+

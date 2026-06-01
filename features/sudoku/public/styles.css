@@ -326,3 +326,94 @@ footer {
     box-shadow: 0 4px 25px hsla(180, 80%, 65%, 0.5);
   }
 }
+
+/* P2P Connection Console Custom Styling */
+.p2p-card {
+  align-items: stretch !important;
+}
+
+.indicator-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+.indicator-dot.red-glow {
+  background: var(--accent-error);
+  box-shadow: 0 0 8px var(--accent-error), 0 0 15px var(--accent-error);
+  animation: pulse-red 2s infinite ease-in-out;
+}
+
+.indicator-dot.yellow-glow {
+  background: hsl(40, 95%, 60%);
+  box-shadow: 0 0 8px hsl(40, 95%, 60%), 0 0 15px hsl(40, 95%, 60%);
+  animation: pulse-yellow 2s infinite ease-in-out;
+}
+
+.indicator-dot.blue-glow {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan), 0 0 15px var(--accent-cyan);
+  animation: pulse-blue 2s infinite ease-in-out;
+}
+
+.indicator-dot.green-glow {
+  background: hsl(140, 80%, 65%);
+  box-shadow: 0 0 8px hsl(140, 80%, 65%), 0 0 15px hsl(140, 80%, 65%);
+  animation: pulse-green 2s infinite ease-in-out;
+}
+
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 6px var(--accent-error); }
+  50% { box-shadow: 0 0 16px var(--accent-error); }
+}
+
+@keyframes pulse-yellow {
+  0%, 100% { box-shadow: 0 0 6px hsl(40, 95%, 60%); }
+  50% { box-shadow: 0 0 16px hsl(40, 95%, 60%); }
+}
+
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 6px var(--accent-cyan); }
+  50% { box-shadow: 0 0 16px var(--accent-cyan); }
+}
+
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 6px hsl(140, 80%, 65%); }
+  50% { box-shadow: 0 0 16px hsl(140, 80%, 65%); }
+}
+
+.toggle-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toggle-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.toggle-btn.active {
+  color: hsl(230, 40%, 10%);
+  background: var(--accent-cyan) !important;
+  box-shadow: 0 2px 8px var(--accent-cyan-glow);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.btn-small {
+  padding: 6px 12px !important;
+  font-size: 0.8rem !important;
+  border-radius: 8px !important;
+}
