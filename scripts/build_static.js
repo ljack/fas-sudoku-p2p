@@ -37,20 +37,21 @@ const htmlPath = path.join(distStaticDir, 'index.html');
 if (fs.existsSync(htmlPath)) {
   let html = fs.readFileSync(htmlPath, 'utf8');
   
-  // Replace absolute assets paths with relative paths
-  html = html.replace('/sudoku-client/styles.css', 'styles.css');
-  html = html.replace('/sudoku-client/app.js', 'app.js');
-  html = html.replace('/sudoku-client/qrcode.min.js', 'qrcode.min.js');
+  // Replace absolute assets paths with relative paths and append dynamic cache buster
+  const version = Date.now();
+  html = html.replace('/sudoku-client/styles.css', `styles.css?v=${version}`);
+  html = html.replace('/sudoku-client/app.js', `app.js?v=${version}`);
+  html = html.replace('/sudoku-client/qrcode.min.js', `qrcode.min.js?v=${version}`);
   
   // Inject coop features statically (since there is no Express context replacement)
   const coopInject = `
-  <link rel="stylesheet" href="inject.css">
-  <script src="inject.js" defer></script>
+  <link rel="stylesheet" href="inject.css?v=${version}">
+  <script src="inject.js?v=${version}" defer></script>
   `;
   html = html.replace('<!-- FAS_INJECT -->', coopInject);
   
   fs.writeFileSync(htmlPath, html);
-  console.log('[Static Builder] index.html successfully compiled with relative paths and static injections.');
+  console.log(`[Static Builder] index.html successfully compiled with relative paths and version v=${version}.`);
 } else {
   console.error('[Static Builder] Error: index.html not found in dist-static!');
 }
