@@ -300,20 +300,66 @@
     }
   }
 
-  // Connect slot with pasting answer token
-  async function applyClientAnswer(token, slotId) {
-    const slot = slots[slotId];
-    if (!slot) return;
+  function parsePastedToken(input) {
+    if (!input) return null;
+    let token = input.trim();
+    if (token.includes('http://') || token.includes('https://')) {
+      const offerMatch = token.match(/offer=([^&\s]+)/);
+      if (offerMatch) {
+        token = decodeURIComponent(offerMatch[1]);
+      } else {
+        const hashIndex = token.indexOf('#');
+        if (hashIndex !== -1) {
+          const hash = token.substring(hashIndex + 1);
+          const params = {};
+          hash.split('&').forEach(pair => {
+            const [key, val] = pair.split('=');
+            if (key && val) params[key] = decodeURIComponent(val);
+          });
+          if (params.offer) token = params.offer;
+        }
+      }
+    }
+    return token;
+  }
+
+  // Connect slot with pasting answer or offer token
+  async function applyManualToken(pastedText, slotId) {
+    const token = parsePastedToken(pastedText);
+    if (!token) return;
     try {
-      console.log(`[P2P Connection][${slotId}] Applying remote answer token...`);
+      console.log(`[P2P Connection][${slotId}] Processing remote token...`);
       const tokenObj = JSON.parse(atob(token));
-      
-      await slot.pc.setRemoteDescription(new RTCSessionDescription(tokenObj.sdp));
-      slot.status = 'connecting';
-      updateUIStatus('connecting');
+      const sdpType = tokenObj.sdp && tokenObj.sdp.type;
+
+      if (sdpType === 'offer') {
+        console.log(`[P2P Connection] Manually received Offer. Initializing connection...`);
+        if (pastedText.includes('gameId=')) {
+          const gameIdMatch = pastedText.match(/gameId=([^&\s]+)/);
+          const gridMatch = pastedText.match(/grid=([^&\s]+)/);
+          if (gameIdMatch) {
+            const gid = decodeURIComponent(gameIdMatch[1]);
+            window.location.hash = `gameId=${gid}${gridMatch ? '&grid=' + decodeURIComponent(gridMatch[1]) : ''}`;
+            console.log(`[P2P Connection] Loaded game from manual paste: ${gid}`);
+          }
+        }
+        setupWebRTC('parent_slot', tokenObj);
+      } else if (sdpType === 'answer') {
+        const slot = slots[slotId];
+        if (!slot) {
+          console.warn(`[P2P Connection] Slot ${slotId} not found to apply answer.`);
+          alert(`Slot ${slotId} is not ready to receive an answer.`);
+          return;
+        }
+        await slot.pc.setRemoteDescription(new RTCSessionDescription(tokenObj.sdp));
+        slot.status = 'connecting';
+        updateUIStatus('connecting');
+      } else {
+        alert('Invalid token format.');
+      }
     } catch (err) {
-      console.error(`[P2P Connection][${slotId}] Answer application failed:`, err);
-      alert('Failed to parse remote token.');
+      console.error(`[P2P Connection][${slotId}] Token application failed:`, err);
+      alert('Failed to parse remote token. Please make sure you copied the entire message.');
     }
   }
 
@@ -478,7 +524,7 @@
       case 'signal-answer':
         if (msg.destPeerId === myPeerId) {
           console.log(`[P2P Auto-Signaling] Received background answer from: ${msg.srcPeerId}. Establishing link.`);
-          applyClientAnswer(btoa(JSON.stringify({ sdp: msg.sdp })), 'auto_' + msg.srcPeerId);
+          applyManualToken(btoa(JSON.stringify({ sdp: msg.sdp })), 'auto_' + msg.srcPeerId);
         } else {
           console.log(`[P2P Relay] Relaying signal-answer from ${msg.srcPeerId} to ${msg.destPeerId}`);
           sendToPeer(msg.destPeerId, msg);
@@ -845,7 +891,7 @@
   });
 
   window.addEventListener('sudoku:submitManualToken', (e) => {
-    applyClientAnswer(e.detail.token, e.detail.slotId);
+    applyManualToken(e.detail.token, e.detail.slotId);
   });
 
   window.addEventListener('sudoku:triggerManualOffer', (e) => {
