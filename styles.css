@@ -418,6 +418,20 @@ footer {
   border-radius: 8px !important;
 }
 
+#qrcode {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease;
+  transform-origin: center center;
+  position: relative;
+  z-index: 10;
+  cursor: zoom-in;
+}
+
+#qrcode:hover {
+  transform: scale(2.2);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.8) !important;
+  z-index: 100;
+}
+
 #qrcode img, #qrcode canvas {
   display: block;
   width: 160px !important;
