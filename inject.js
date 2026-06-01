@@ -228,7 +228,7 @@
     if (!slot) return;
 
     let minifiedSdp = slot.pc.localDescription.sdp || '';
-    if (minifiedSdp) {
+    if (minifiedSdp && minifiedSdp.includes('\r\n')) {
       minifiedSdp = minifiedSdp.split('\r\n')
         .filter(line => {
           if (!line.trim()) return false;
