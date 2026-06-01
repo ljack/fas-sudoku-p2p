@@ -1,4 +1,4 @@
-(function() {
+(async function() {
   const oldLog = console.log;
   console.log = function(...args) {
     oldLog.apply(console, args);
@@ -34,10 +34,74 @@
   const nameList = ['Solar Solver', 'Quantum Solver', 'P2P Brain', 'IPv6 Voyager', 'Gravity Solver', 'Grid Titan'];
   const myNickname = nameList[Math.floor(Math.random() * nameList.length)] + ' #' + Math.floor(Math.random() * 900 + 100);
 
+  // Compression & Decompression Utilities
+  const isCompressionSupported = typeof window.CompressionStream !== 'undefined' && typeof window.DecompressionStream !== 'undefined';
+
+  async function compressText(text) {
+    if (!isCompressionSupported) return null;
+    const stream = new Blob([text]).stream();
+    const compressedStream = stream.pipeThrough(new CompressionStream('deflate'));
+    const buffer = await new Response(compressedStream).arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  async function decompressText(bytes) {
+    if (!isCompressionSupported) return '';
+    const stream = new Blob([bytes]).stream();
+    const decompressedStream = stream.pipeThrough(new DecompressionStream('deflate'));
+    return await new Response(decompressedStream).text();
+  }
+
+  function uint8ArrayToBase64Url(uint8Array) {
+    let binary = '';
+    const len = uint8Array.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(uint8Array[i]);
+    }
+    const base64 = btoa(binary);
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function base64UrlToUint8Array(base64Url) {
+    let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = base64.length % 4;
+    if (pad === 2) base64 += '==';
+    else if (pad === 3) base64 += '=';
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
   // 2. Parse URL hash to determine role and game configuration
-  function parseHash() {
+  async function getHashParams() {
     const hash = window.location.hash.substring(1);
     if (!hash) return {};
+
+    if (hash.startsWith('j_')) {
+      try {
+        const token = hash.substring(2);
+        const bytes = base64UrlToUint8Array(token);
+        const decompressed = await decompressText(bytes);
+        const inviteData = JSON.parse(decompressed);
+        
+        // Convert to legacy structure for seamless backward compatibility
+        return {
+          gameId: inviteData.gameId,
+          grid: inviteData.grid,
+          offer: btoa(JSON.stringify(inviteData.offer)),
+          proxyPeerId: inviteData.proxyPeerId
+        };
+      } catch (err) {
+        console.error('[P2P Setup] Failed to decompress token from hash:', err);
+        return {};
+      }
+    }
+
+    // Legacy fallback parsing
     const params = {};
     hash.split('&').forEach(pair => {
       const [key, val] = pair.split('=');
@@ -48,7 +112,7 @@
     return params;
   }
 
-  const hashParams = parseHash();
+  const hashParams = await getHashParams();
   const hasOfferInHash = !!hashParams.offer;
   
   // If hash contains an offer, this peer is a Client. If not, this peer is the Host.
@@ -57,6 +121,7 @@
   const myPeerId = isHost ? 'host' : 'client_' + Math.random().toString(36).substring(2, 9);
   
   console.log(`[P2P Profile] Peer ID: ${myPeerId} (${isHost ? 'Host' : 'Client'}), Nickname: ${myNickname}`);
+
 
   // WebRTC Stun config
   const config = {
@@ -223,7 +288,7 @@
   }
 
   // Called when SDP is fully gathered
-  function onIceGatheringComplete(slotId) {
+  async function onIceGatheringComplete(slotId) {
     const slot = slots[slotId];
     if (!slot) return;
 
@@ -241,7 +306,7 @@
       if (!minifiedSdp.endsWith('\r\n')) minifiedSdp += '\r\n';
     }
 
-    const sdpToken = btoa(JSON.stringify({
+    const offerObj = {
       sdp: {
         type: slot.pc.localDescription.type,
         sdp: minifiedSdp
@@ -250,16 +315,39 @@
       peerId: myPeerId,
       nickname: myNickname,
       color: myColor
-    }));
+    };
+
+    const sdpToken = btoa(JSON.stringify(offerObj));
 
     if (slot.pc.localDescription.type === 'offer') {
       // We are the initiator (either Host or a client creating a proxy link)
       const grid = window.sudokuInitialGrid || hashParams.grid || '';
       
-      let shareURL = `${window.location.origin}${window.location.pathname}#gameId=${encodeURIComponent(gameId)}&grid=${encodeURIComponent(grid)}&offer=${encodeURIComponent(sdpToken)}&slotId=${encodeURIComponent(slotId)}`;
-      if (!isHost) {
-        // If client is acting as a proxy, append proxy parameter
-        shareURL += `&proxyPeerId=${encodeURIComponent(myPeerId)}`;
+      let shareURL = '';
+      if (isCompressionSupported) {
+        try {
+          const inviteData = {
+            gameId: gameId,
+            grid: grid,
+            offer: offerObj
+          };
+          if (!isHost) {
+            inviteData.proxyPeerId = myPeerId;
+          }
+          const inviteStr = JSON.stringify(inviteData);
+          const compressedBytes = await compressText(inviteStr);
+          const compressedToken = uint8ArrayToBase64Url(compressedBytes);
+          shareURL = `${window.location.origin}${window.location.pathname}#j_${compressedToken}`;
+        } catch (err) {
+          console.error('[P2P] Compression failed, falling back to legacy URL format:', err);
+        }
+      }
+
+      if (!shareURL) {
+        shareURL = `${window.location.origin}${window.location.pathname}#gameId=${encodeURIComponent(gameId)}&grid=${encodeURIComponent(grid)}&offer=${encodeURIComponent(sdpToken)}&slotId=${encodeURIComponent(slotId)}`;
+        if (!isHost) {
+          shareURL += `&proxyPeerId=${encodeURIComponent(myPeerId)}`;
+        }
       }
 
       // Auto slot offers are tunneled via data channel, not manually copy-pasted
@@ -300,48 +388,109 @@
     }
   }
 
-  function parsePastedToken(input) {
+  async function resolveSDPToken(input) {
     if (!input) return null;
     let token = input.trim();
-    if (token.includes('http://') || token.includes('https://')) {
-      const offerMatch = token.match(/offer=([^&\s]+)/);
-      if (offerMatch) {
-        token = decodeURIComponent(offerMatch[1]);
-      } else {
-        const hashIndex = token.indexOf('#');
-        if (hashIndex !== -1) {
-          const hash = token.substring(hashIndex + 1);
+    
+    // Check if it's a URL or contains hash
+    if (token.includes('http://') || token.includes('https://') || token.includes('#')) {
+      const hashIndex = token.indexOf('#');
+      if (hashIndex !== -1) {
+        const hash = token.substring(hashIndex + 1);
+        if (hash.startsWith('j_')) {
+          try {
+            const compressedToken = hash.substring(2);
+            const bytes = base64UrlToUint8Array(compressedToken);
+            const decompressed = await decompressText(bytes);
+            const inviteData = JSON.parse(decompressed);
+            return inviteData.offer;
+          } catch (err) {
+            console.error('[P2P] Failed to resolve compressed hash URL:', err);
+            return null;
+          }
+        } else {
           const params = {};
           hash.split('&').forEach(pair => {
             const [key, val] = pair.split('=');
             if (key && val) params[key] = decodeURIComponent(val);
           });
-          if (params.offer) token = params.offer;
+          if (params.offer) {
+            try {
+              return JSON.parse(atob(params.offer));
+            } catch (e) {
+              console.error('[P2P] Failed to parse legacy offer from hash:', e);
+            }
+          }
         }
       }
+      
+      const offerMatch = token.match(/offer=([^&\s]+)/);
+      if (offerMatch) {
+        try {
+          return JSON.parse(atob(decodeURIComponent(offerMatch[1])));
+        } catch (e) {}
+      }
     }
-    return token;
+    
+    // Raw tokens
+    if (token.startsWith('j_')) {
+      try {
+        const compressedToken = token.substring(2);
+        const bytes = base64UrlToUint8Array(compressedToken);
+        const decompressed = await decompressText(bytes);
+        const inviteData = JSON.parse(decompressed);
+        return inviteData.offer;
+      } catch (err) {
+        console.error('[P2P] Failed to resolve raw compressed token:', err);
+        return null;
+      }
+    }
+    
+    try {
+      return JSON.parse(atob(token));
+    } catch (err) {
+      console.error('[P2P] Failed to parse raw legacy token:', err);
+      return null;
+    }
   }
 
   // Connect slot with pasting answer or offer token
   async function applyManualToken(pastedText, slotId) {
-    const token = parsePastedToken(pastedText);
-    if (!token) return;
     try {
       console.log(`[P2P Connection][${slotId}] Processing remote token...`);
-      const tokenObj = JSON.parse(atob(token));
+      const tokenObj = await resolveSDPToken(pastedText);
+      if (!tokenObj) {
+        alert('Failed to parse remote token. Please make sure you copied the entire message.');
+        return;
+      }
       const sdpType = tokenObj.sdp && tokenObj.sdp.type;
 
       if (sdpType === 'offer') {
         console.log(`[P2P Connection] Manually received Offer. Initializing connection...`);
-        if (pastedText.includes('gameId=')) {
+        let gid = null;
+        let grid = null;
+
+        if (pastedText.includes('#j_')) {
+          try {
+            const hashIndex = pastedText.indexOf('#');
+            const hash = pastedText.substring(hashIndex + 1);
+            const compressedToken = hash.substring(2);
+            const bytes = base64UrlToUint8Array(compressedToken);
+            const decompressed = await decompressText(bytes);
+            const inviteData = JSON.parse(decompressed);
+            gid = inviteData.gameId;
+            grid = inviteData.grid;
+          } catch(e) {}
+        } else if (pastedText.includes('gameId=')) {
           const gameIdMatch = pastedText.match(/gameId=([^&\s]+)/);
           const gridMatch = pastedText.match(/grid=([^&\s]+)/);
-          if (gameIdMatch) {
-            const gid = decodeURIComponent(gameIdMatch[1]);
-            window.location.hash = `gameId=${gid}${gridMatch ? '&grid=' + decodeURIComponent(gridMatch[1]) : ''}`;
-            console.log(`[P2P Connection] Loaded game from manual paste: ${gid}`);
-          }
+          if (gameIdMatch) gid = decodeURIComponent(gameIdMatch[1]);
+          if (gridMatch) grid = decodeURIComponent(gridMatch[1]);
+        }
+
+        if (gid) {
+          window.location.hash = `gameId=${gid}${grid ? '&grid=' + grid : ''}`;
+          console.log(`[P2P Connection] Loaded game from manual paste: ${gid}`);
         }
         setupWebRTC('parent_slot', tokenObj);
       } else if (sdpType === 'answer') {

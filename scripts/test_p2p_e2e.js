@@ -192,7 +192,7 @@ const puppeteer = require('puppeteer');
     clientPage2.on('pageerror', err => console.error(`[Client 2 PageError] ${err.toString()}`));
 
     console.log('[E2E Test] Loading Host page from local static build...');
-    await hostPage.goto('file:///Users/jarkko/_dev/fas-sudoku-p2p/dist-static/index.html', { waitUntil: 'networkidle2' });
+    await hostPage.goto('file:///Users/jarkko/_dev/fas-sudoku-app/dist-static/index.html', { waitUntil: 'networkidle2' });
 
     console.log('[E2E Test] Switching Host to Manual signaling mode...');
     await hostPage.evaluate(() => {
@@ -211,7 +211,7 @@ const puppeteer = require('puppeteer');
 
     await hostPage.waitForFunction(() => {
       const val = document.getElementById('local-sdp-text').value;
-      return val && val.includes('#gameId=');
+      return val && (val.includes('#gameId=') || val.includes('#j_'));
     }, { polling: 100, timeout: 8000 });
 
     const shareURL1 = await hostPage.evaluate(() => document.getElementById('local-sdp-text').value);
@@ -223,7 +223,7 @@ const puppeteer = require('puppeteer');
     // Wait for Client 1 answer
     await clientPage1.waitForFunction(() => {
       const val = document.getElementById('local-sdp-text').value;
-      return val && val.length > 50 && !val.includes('#gameId=');
+      return val && val.length > 50 && !val.includes('#gameId=') && !val.includes('#j_');
     }, { polling: 100, timeout: 8000 });
 
     const client1Answer = await clientPage1.evaluate(() => document.getElementById('local-sdp-text').value);
@@ -263,7 +263,7 @@ const puppeteer = require('puppeteer');
 
     await clientPage1.waitForFunction(() => {
       const val = document.getElementById('local-sdp-text').value;
-      return val && val.includes('#gameId=');
+      return val && (val.includes('#gameId=') || val.includes('#j_'));
     }, { polling: 100, timeout: 8000 });
 
     const relayURL = await clientPage1.evaluate(() => document.getElementById('local-sdp-text').value);
@@ -274,7 +274,7 @@ const puppeteer = require('puppeteer');
 
     await clientPage2.waitForFunction(() => {
       const val = document.getElementById('local-sdp-text').value;
-      return val && val.length > 50 && !val.includes('#gameId=');
+      return val && val.length > 50 && !val.includes('#gameId=') && !val.includes('#j_');
     }, { polling: 100, timeout: 8000 });
 
     const client2Answer = await clientPage2.evaluate(() => document.getElementById('local-sdp-text').value);
