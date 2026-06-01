@@ -465,7 +465,9 @@ function refreshActiveSlotUI() {
     if (btnCopyLocal) btnCopyLocal.classList.remove('hidden');
     if (tokens.local.startsWith('http') || tokens.local.includes('#gameId=')) {
       if (qrcodeContainer) qrcodeContainer.classList.remove('hidden');
-      renderSlotQRCode(tokens.local);
+      setTimeout(() => {
+        renderSlotQRCode(tokens.local);
+      }, 50);
     } else {
       if (qrcodeContainer) qrcodeContainer.classList.add('hidden');
     }
