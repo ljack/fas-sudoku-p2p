@@ -21,7 +21,7 @@ let gameId = hashParams.gameId;
 if (!gameId) {
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   const lastPart = pathParts.pop();
-  if (lastPart && lastPart !== 'sudoku' && lastPart !== 'index.html') {
+  if (lastPart && lastPart.startsWith('game_')) {
     gameId = lastPart;
   }
 }
