@@ -1,7 +1,52 @@
 // Parse URL hash to extract game variables
-function parseHash() {
+const isCompressionSupported = typeof window.CompressionStream !== 'undefined' && typeof window.DecompressionStream !== 'undefined';
+
+async function decompressText(bytes) {
+  if (!isCompressionSupported) return '';
+  const stream = new Blob([bytes]).stream();
+  const decompressedStream = stream.pipeThrough(new DecompressionStream('deflate'));
+  return await new Response(decompressedStream).text();
+}
+
+function base64UrlToUint8Array(base64Url) {
+  let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = base64.length % 4;
+  if (pad === 2) base64 += '==';
+  else if (pad === 3) base64 += '=';
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function getHashParams() {
   const hash = window.location.hash.substring(1);
   if (!hash) return {};
+
+  if (hash.startsWith('j_')) {
+    try {
+      const token = hash.substring(2);
+      const bytes = base64UrlToUint8Array(token);
+      const decompressed = await decompressText(bytes);
+      const inviteData = JSON.parse(decompressed);
+      
+      // Convert to legacy structure for seamless backward compatibility
+      return {
+        gameId: inviteData.gameId,
+        grid: inviteData.grid,
+        offer: btoa(JSON.stringify(inviteData.offer)),
+        proxyPeerId: inviteData.proxyPeerId
+      };
+    } catch (err) {
+      console.error('[P2P Setup] Failed to decompress token from hash:', err);
+      return {};
+    }
+  }
+
+  // Legacy fallback parsing
   const params = {};
   hash.split('&').forEach(pair => {
     const [key, val] = pair.split('=');
@@ -12,24 +57,10 @@ function parseHash() {
   return params;
 }
 
-const hashParams = parseHash();
-const hasOfferInHash = !!hashParams.offer;
-const isHost = !hasOfferInHash;
-
-// Extract gameId
-let gameId = hashParams.gameId;
-if (!gameId) {
-  const pathParts = window.location.pathname.split('/').filter(Boolean);
-  const lastPart = pathParts.pop();
-  if (lastPart && lastPart.startsWith('game_')) {
-    gameId = lastPart;
-  }
-}
-if (!gameId) {
-  gameId = 'game_' + Math.random().toString(36).substring(2, 9);
-}
-
-document.getElementById('game-id').textContent = gameId;
+let hashParams = {};
+let hasOfferInHash = false;
+let isHost = true;
+let gameId = '';
 
 let initialGrid = "";
 let currentGrid = "";
@@ -131,6 +162,26 @@ const qrcodeContainer = document.getElementById('qrcode-container');
 // Initialize game
 async function init() {
   try {
+    hashParams = await getHashParams();
+    hasOfferInHash = !!hashParams.offer;
+    isHost = !hasOfferInHash;
+    
+    // Extract gameId
+    gameId = hashParams.gameId;
+    if (!gameId) {
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      const lastPart = pathParts.pop();
+      if (lastPart && lastPart.startsWith('game_')) {
+        gameId = lastPart;
+      }
+    }
+    if (!gameId) {
+      gameId = 'game_' + Math.random().toString(36).substring(2, 9);
+    }
+    
+    const gameIdEl = document.getElementById('game-id');
+    if (gameIdEl) gameIdEl.textContent = gameId;
+
     logDiagnostic(`Initializing board. Role: ${isHost ? 'Host' : 'Client'}`);
     
     // UI configuration depending on Host/Client role
