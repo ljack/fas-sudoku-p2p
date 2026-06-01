@@ -20,7 +20,7 @@
     }
   };
 
-  console.log('[FAS Plugin] Injecting 1-Way Manual WebRTC P2P Engine...');
+  console.log('[FAS Plugin] Injecting Mesh WebRTC P2P Engine...');
 
   // 1. Establish player identity
   const colorList = [
@@ -58,23 +58,46 @@
   
   console.log(`[P2P Profile] Peer ID: ${myPeerId} (${isHost ? 'Host' : 'Client'}), Nickname: ${myNickname}`);
 
-  // 3. WebRTC Configuration (Using public Google STUN for ICE gathering)
+  // WebRTC Stun config
   const config = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   };
 
-  let p2pStatus = 'disconnected'; // 'disconnected', 'gathering', 'handshaking', 'connected'
-  let pc = null;
-  let dc = null;
+  let p2pStatus = 'disconnected';
   let discoveredIPs = new Set();
-  let activePlayers = [];
+  
+  // Mesh Data Structures
+  let slots = {}; // maps slotId -> { id, pc, dc, status, clientInfo, isAuto }
+  let proxiedPeers = {}; // Host maps proxiedPeerId -> proxyPeerId (relaying client)
+  let activePlayers = [{
+    playerId: myPeerId,
+    nickname: myNickname,
+    color: myColor,
+    isHost
+  }];
+  
+  let messageSeq = 0;
+  const seenMessages = new Set();
+  let primaryRouteSlotId = null; // Client's primary route connection to the Host
 
-  // Update connection status in UI console
+  // Update status and broadcast presence details to UI
   function updateUIStatus(statusText, extra = '') {
     p2pStatus = statusText;
     const ipList = Array.from(discoveredIPs).filter(ip => ip.includes(':') || ip.split('.').length === 4);
     const hasIPv6 = ipList.some(ip => ip.includes(':'));
 
+    const simplifiedSlots = {};
+    for (const sid in slots) {
+      simplifiedSlots[sid] = {
+        id: sid,
+        status: slots[sid].status,
+        nickname: slots[sid].clientInfo ? slots[sid].clientInfo.nickname : null,
+        color: slots[sid].clientInfo ? slots[sid].clientInfo.color : null,
+        isAuto: slots[sid].isAuto
+      };
+    }
+
+    console.log('[E2E Debug INJECT] dispatching sudoku:p2pStatus statusText:', statusText, 'p2pStatus:', p2pStatus);
     window.dispatchEvent(new CustomEvent('sudoku:p2pStatus', {
       detail: {
         status: p2pStatus,
@@ -86,12 +109,13 @@
         hasIPv6,
         ips: ipList,
         players: activePlayers,
+        slots: simplifiedSlots,
         extra
       }
     }));
   }
 
-  // Extract IP addresses from candidates (especially looking for public IPv6 routes)
+  // Extract IPs from candidate profiles
   function inspectCandidate(candidateString) {
     if (!candidateString) return;
     try {
@@ -108,9 +132,25 @@
     }
   }
 
-  // 4. Initialize WebRTC peer connection
-  async function setupWebRTC() {
-    pc = new RTCPeerConnection(config);
+  // 4. Initialize Slot Connection
+  async function setupWebRTC(slotId, remoteOffer = null) {
+    console.log(`[P2P Setup] Initializing connection for slot: ${slotId}`);
+    
+    // Clean up existing slot if any
+    if (slots[slotId]) {
+      try { slots[slotId].pc.close(); } catch(e) {}
+      delete slots[slotId];
+    }
+
+    const pc = new RTCPeerConnection(config);
+    slots[slotId] = {
+      id: slotId,
+      pc: pc,
+      dc: null,
+      status: 'disconnected',
+      clientInfo: null,
+      isAuto: slotId.startsWith('auto_')
+    };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -119,151 +159,320 @@
     };
 
     pc.onicegatheringstatechange = () => {
-      console.log(`[ICE Gathering] State changed to: ${pc.iceGatheringState}`);
+      console.log(`[ICE Gathering][${slotId}] State changed to: ${pc.iceGatheringState}`);
       if (pc.iceGatheringState === 'complete') {
-        onIceGatheringComplete();
+        onIceGatheringComplete(slotId);
       }
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(`[P2P Connection] State: ${pc.connectionState}`);
+      console.log(`[P2P Connection][${slotId}] State: ${pc.connectionState}`);
       if (pc.connectionState === 'connected') {
-        updateUIStatus('connected');
-        console.log('[P2P Connection] Direct DTLS/SCTP link established!');
+        slots[slotId].status = 'connected';
+        
+        // If client and we connected to parent_slot, make it primary
+        if (!isHost && slotId === 'parent_slot') {
+          primaryRouteSlotId = 'parent_slot';
+        }
+        updateUIStatus(slots[slotId].isAuto ? p2pStatus : 'connected');
+        console.log(`[P2P Connection][${slotId}] Link successfully established!`);
       } else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        cleanup();
+        handleSlotClosed(slotId);
       }
     };
 
-    if (isHost) {
-      // 5. Host flow: Create and own the data channel
-      console.log('[P2P Setup] Host initializing peer connection...');
-      dc = pc.createDataChannel('game-data', { negotiated: false });
-      setupDataChannelListeners(dc, 'client');
-      
-      updateUIStatus('gathering');
-      
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      console.log('[P2P Setup] Offer SDP generated. Gathering ICE paths...');
-    } else {
-      // 6. Client flow: Consume offer and wait for Host data channel
-      console.log('[P2P Setup] Client initializing peer connection from URL Offer...');
+    if (remoteOffer) {
+      // Client/Receiver setup
       pc.ondatachannel = (event) => {
-        console.log('[P2P Connection] Received data channel from Host.');
-        dc = event.channel;
-        setupDataChannelListeners(dc, 'host');
+        console.log(`[P2P Setup][${slotId}] Received remote data channel.`);
+        slots[slotId].dc = event.channel;
+        setupDataChannelListeners(event.channel, slotId);
       };
 
       try {
-        const hostOffer = JSON.parse(atob(hashParams.offer));
-        await pc.setRemoteDescription(new RTCSessionDescription(hostOffer));
-        console.log('[P2P Setup] Applied Host remote description from URL.');
-        
-        updateUIStatus('gathering');
-        
+        const sdpInit = (remoteOffer.sdp && typeof remoteOffer.sdp === 'object') ? remoteOffer.sdp : remoteOffer;
+        await pc.setRemoteDescription(new RTCSessionDescription(sdpInit));
+        slots[slotId].status = 'gathering';
+        updateUIStatus(p2pStatus);
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        console.log('[P2P Setup] Answer SDP generated. Gathering ICE paths...');
       } catch (err) {
-        console.error('[P2P Setup] Failed to parse offer SDP in URL hash:', err);
-        updateUIStatus('disconnected', 'Corrupted or expired URL Offer token.');
+        console.error(`[P2P Setup][${slotId}] Offer application failed:`, err);
+        slots[slotId].status = 'disconnected';
+        updateUIStatus('disconnected', 'Offer parsing error.');
+      }
+    } else {
+      // Host/Initiator setup
+      const dc = pc.createDataChannel('game-data', { negotiated: false });
+      slots[slotId].dc = dc;
+      setupDataChannelListeners(dc, slotId);
+
+      slots[slotId].status = 'gathering';
+      updateUIStatus(p2pStatus);
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+      } catch (err) {
+        console.error(`[P2P Setup][${slotId}] Offer creation failed:`, err);
+        slots[slotId].status = 'disconnected';
+        updateUIStatus(p2pStatus);
       }
     }
   }
 
-  // 7. Triggered when ICE gathering is finished (Vanilla ICE)
-  function onIceGatheringComplete() {
-    const localSDP = pc.localDescription;
-    const sdpToken = btoa(JSON.stringify(localSDP));
+  // Called when SDP is fully gathered
+  function onIceGatheringComplete(slotId) {
+    const slot = slots[slotId];
+    if (!slot) return;
 
-    if (isHost) {
-      // Host generates the shareable game URL containing the offer token
+    const sdpToken = btoa(JSON.stringify({
+      sdp: slot.pc.localDescription,
+      slotId: slotId,
+      peerId: myPeerId,
+      nickname: myNickname,
+      color: myColor
+    }));
+
+    if (slot.pc.localDescription.type === 'offer') {
+      // We are the initiator (either Host or a client creating a proxy link)
       const grid = window.sudokuInitialGrid || hashParams.grid || '';
-      const shareURL = `${window.location.origin}${window.location.pathname}#gameId=${gameId}&grid=${grid}&offer=${sdpToken}`;
       
-      window.dispatchEvent(new CustomEvent('sudoku:manualOfferReady', {
-        detail: { shareURL }
-      }));
-      updateUIStatus('handshaking', 'Shareable URL generated. Awaiting client answer...');
+      let shareURL = `${window.location.origin}${window.location.pathname}#gameId=${gameId}&grid=${grid}&offer=${sdpToken}&slotId=${slotId}`;
+      if (!isHost) {
+        // If client is acting as a proxy, append proxy parameter
+        shareURL += `&proxyPeerId=${myPeerId}`;
+      }
+
+      // Auto slot offers are tunneled via data channel, not manually copy-pasted
+      if (slot.isAuto) {
+        const targetPeerId = slotId.replace('auto_', '');
+        console.log(`[P2P Auto-Signaling] Sending background offer to peer: ${targetPeerId}`);
+        sendToPeer(targetPeerId, {
+          type: 'signal-offer',
+          srcPeerId: myPeerId,
+          destPeerId: targetPeerId,
+          sdp: slot.pc.localDescription
+        });
+      } else {
+        window.dispatchEvent(new CustomEvent('sudoku:manualOfferReady', {
+          detail: { slotId, shareURL }
+        }));
+        slot.status = 'handshaking';
+        updateUIStatus(p2pStatus, 'Invite URL ready for slot ' + slotId);
+      }
     } else {
-      // Client generates its answer token to be pasted back on the Host
-      window.dispatchEvent(new CustomEvent('sudoku:manualAnswerReady', {
-        detail: { token: sdpToken }
-      }));
-      updateUIStatus('handshaking', 'Answer token generated. Send it to the Host.');
+      // We are responding to an offer
+      if (slot.isAuto) {
+        const targetPeerId = slotId.replace('auto_', '');
+        console.log(`[P2P Auto-Signaling] Sending background answer to peer: ${targetPeerId}`);
+        sendToPeer(targetPeerId, {
+          type: 'signal-answer',
+          srcPeerId: myPeerId,
+          destPeerId: targetPeerId,
+          sdp: slot.pc.localDescription
+        });
+      } else {
+        window.dispatchEvent(new CustomEvent('sudoku:manualAnswerReady', {
+          detail: { slotId, token: sdpToken }
+        }));
+        slot.status = 'handshaking';
+        updateUIStatus(p2pStatus, 'Answer token ready.');
+      }
     }
   }
 
-  // 8. Host applies the client's answer token to finish the connection
-  async function applyClientAnswer(token) {
-    if (!isHost || !pc) return;
+  // Connect slot with pasting answer token
+  async function applyClientAnswer(token, slotId) {
+    const slot = slots[slotId];
+    if (!slot) return;
     try {
-      console.log('[P2P Connection] Applying Client answer token...');
-      const clientAnswer = JSON.parse(atob(token));
-      await pc.setRemoteDescription(new RTCSessionDescription(clientAnswer));
-      console.log('[P2P Connection] Client answer applied. Connecting...');
+      console.log(`[P2P Connection][${slotId}] Applying remote answer token...`);
+      const tokenObj = JSON.parse(atob(token));
+      
+      await slot.pc.setRemoteDescription(new RTCSessionDescription(tokenObj.sdp));
+      slot.status = 'connecting';
       updateUIStatus('connecting');
     } catch (err) {
-      console.error('[P2P Connection] Failed to parse remote answer token:', err);
-      alert('Failed to parse answer token. Ensure you copied the entire text.');
+      console.error(`[P2P Connection][${slotId}] Answer application failed:`, err);
+      alert('Failed to parse remote token.');
     }
   }
 
-  // 9. Data Channel Setup & Message Routing
-  function setupDataChannelListeners(channel, targetPeerId) {
+  // Data Channel Handlers
+  function setupDataChannelListeners(channel, slotId) {
     channel.onopen = () => {
-      console.log(`[P2P Link] Channel open with ${targetPeerId}`);
+      console.log(`[P2P Link][${slotId}] Data Channel is open.`);
+      
+      // Send identity intro
       sendDirectMessage(channel, {
         type: 'intro',
+        peerId: myPeerId,
         nickname: myNickname,
         color: myColor,
         isHost
       });
 
-      if (isHost) {
-        // Sync board state to client
+      // If client and we just connected to the primary path, query state sync
+      if (!isHost && slotId === 'parent_slot') {
         window.dispatchEvent(new CustomEvent('sudoku:requestStateSync', {
-          detail: { recipientId: targetPeerId }
+          detail: { recipientId: 'host' }
         }));
       }
-      updateActivePlayers();
-      updateUIStatus('connected');
     };
 
     channel.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type !== 'heartbeat') {
-          console.log(`[P2P Receive] Type: ${msg.type}`);
+        
+        // Deduplicate messages to prevent routing loops in multi-path mesh
+        if (msg.msgId) {
+          if (seenMessages.has(msg.msgId)) return;
+          seenMessages.add(msg.msgId);
+          if (seenMessages.size > 300) {
+            const first = seenMessages.values().next().value;
+            seenMessages.delete(first);
+          }
         }
-        handleDataMessage(targetPeerId, msg);
+        
+        if (msg.type !== 'heartbeat') {
+          console.log(`[P2P Receive] Type: ${msg.type} from slot: ${slotId}`);
+        }
+        
+        handleDataMessage(slotId, msg);
       } catch (err) {
         console.error('[P2P Link] Parse error:', err);
       }
     };
 
     channel.onclose = () => {
-      console.log(`[P2P Link] Channel closed with ${targetPeerId}`);
-      cleanup();
+      console.log(`[P2P Link][${slotId}] Channel closed.`);
+      handleSlotClosed(slotId);
     };
   }
 
-  function handleDataMessage(senderId, msg) {
+  // Central Router for Mesh Messages
+  function handleDataMessage(slotId, msg) {
+    const senderSlot = slots[slotId];
+    const directSenderId = senderSlot && senderSlot.clientInfo ? senderSlot.clientInfo.peerId : null;
+
     switch (msg.type) {
       case 'intro':
-        activePlayers = [{
-          playerId: myPeerId,
-          nickname: myNickname,
-          color: myColor,
-          isHost
-        }, {
-          playerId: senderId,
-          nickname: msg.nickname,
-          color: msg.color,
-          isHost: msg.isHost
-        }];
+        // Save client profile info in slot
+        if (slots[slotId]) {
+          slots[slotId].clientInfo = {
+            peerId: msg.peerId,
+            nickname: msg.nickname,
+            color: msg.color,
+            isHost: msg.isHost
+          };
+        }
+
+        if (isHost) {
+          // Register player
+          registerActivePlayer({
+            playerId: msg.peerId,
+            nickname: msg.nickname,
+            color: msg.color,
+            isHost: false
+          });
+          
+          broadcastPlayersList();
+          
+          // Trigger board state sync
+          window.dispatchEvent(new CustomEvent('sudoku:requestStateSync', {
+            detail: { recipientId: msg.peerId }
+          }));
+        } else {
+          // If we are a Client, and this is a downstream connection (acting as Proxy)
+          if (slotId !== 'parent_slot' && !slots[slotId].isAuto) {
+            console.log(`[P2P Proxy] Registering downstream child peer: ${msg.peerId} with Host...`);
+            sendToHost({
+              type: 'proxy-register',
+              peerId: msg.peerId,
+              nickname: msg.nickname,
+              color: msg.color
+            });
+          }
+        }
         updateUIStatus(p2pStatus);
+        break;
+
+      case 'proxy-register':
+        // Only host handles proxy registrations
+        if (isHost) {
+          console.log(`[P2P Host] Registering proxied peer ${msg.peerId} via proxy ${directSenderId}`);
+          proxiedPeers[msg.peerId] = directSenderId;
+          
+          registerActivePlayer({
+            playerId: msg.peerId,
+            nickname: msg.nickname,
+            color: msg.color,
+            isHost: false,
+            proxyId: directSenderId
+          });
+          
+          broadcastPlayersList();
+          
+          // Trigger board state sync for the proxied client
+          window.dispatchEvent(new CustomEvent('sudoku:requestStateSync', {
+            detail: { recipientId: msg.peerId }
+          }));
+
+          // AUTO-SIGNALING BOOTSTRAP: Host automatically initiates a background connection with Client 2
+          console.log(`[P2P Auto-Signaling] Initiating background fallback path directly with: ${msg.peerId}`);
+          setupWebRTC('auto_' + msg.peerId);
+        }
+        break;
+
+      case 'proxy-deregister':
+        if (isHost) {
+          console.log(`[P2P Host] Deregistering proxied peer ${msg.peerId}`);
+          delete proxiedPeers[msg.peerId];
+          activePlayers = activePlayers.filter(p => p.playerId !== msg.peerId);
+          broadcastPlayersList();
+          updateUIStatus(p2pStatus);
+        }
+        break;
+
+      case 'proxy-message':
+        // Relay messages through intermediate node
+        if (msg.targetPeerId === myPeerId) {
+          // This is for us! Unwrap it and handle locally
+          handleDataMessage(slotId, msg.payload);
+        } else {
+          // Forward wrapper along paths
+          console.log(`[P2P Relay] Forwarding proxy-message from ${directSenderId} to ${msg.targetPeerId}`);
+          sendToPeer(msg.targetPeerId, msg);
+        }
+        break;
+
+      case 'signal-offer':
+        if (msg.destPeerId === myPeerId) {
+          console.log(`[P2P Auto-Signaling] Received background offer from: ${msg.srcPeerId}. Answering...`);
+          setupWebRTC('auto_' + msg.srcPeerId, msg.sdp);
+        } else {
+          console.log(`[P2P Relay] Relaying signal-offer from ${msg.srcPeerId} to ${msg.destPeerId}`);
+          sendToPeer(msg.destPeerId, msg);
+        }
+        break;
+
+      case 'signal-answer':
+        if (msg.destPeerId === myPeerId) {
+          console.log(`[P2P Auto-Signaling] Received background answer from: ${msg.srcPeerId}. Establishing link.`);
+          applyClientAnswer(btoa(JSON.stringify({ sdp: msg.sdp })), 'auto_' + msg.srcPeerId);
+        } else {
+          console.log(`[P2P Relay] Relaying signal-answer from ${msg.srcPeerId} to ${msg.destPeerId}`);
+          sendToPeer(msg.destPeerId, msg);
+        }
+        break;
+
+      case 'players-sync':
+        if (!isHost) {
+          activePlayers = msg.players;
+          updateUIStatus(p2pStatus);
+        }
         break;
 
       case 'state-sync':
@@ -281,34 +490,67 @@
 
       case 'move':
         if (isHost) {
-          console.log(`[P2P Host] Validating move from client: Cell ${msg.cellIndex} -> ${msg.value}`);
+          const actualSenderId = msg.senderId || directSenderId;
+          console.log(`[P2P Host] Validating move from client ${actualSenderId}: Cell ${msg.cellIndex} -> ${msg.value}`);
           window.dispatchEvent(new CustomEvent('sudoku:localMove', {
-            detail: { cellIndex: msg.cellIndex, value: msg.value, isExternal: true, senderId }
+            detail: { cellIndex: msg.cellIndex, value: msg.value, isExternal: true, senderId: actualSenderId }
           }));
         } else {
-          window.dispatchEvent(new CustomEvent('sudoku:externalMove', {
-            detail: { grid: msg.grid, status: msg.status }
-          }));
+          if (slotId !== 'parent_slot') {
+            console.log(`[P2P Proxy] Relaying move from downstream client ${msg.senderId || directSenderId} to Host.`);
+            if (!msg.senderId) msg.senderId = directSenderId;
+            sendToHost(msg);
+          } else {
+            window.dispatchEvent(new CustomEvent('sudoku:externalMove', {
+              detail: { grid: msg.grid, status: msg.status }
+            }));
+          }
         }
         break;
 
       case 'solve':
         if (isHost) {
-          window.dispatchEvent(new CustomEvent('sudoku:localSolve', { detail: { senderId } }));
+          const actualSenderId = msg.senderId || directSenderId;
+          window.dispatchEvent(new CustomEvent('sudoku:localSolve', { detail: { senderId: actualSenderId } }));
         } else {
-          window.dispatchEvent(new CustomEvent('sudoku:externalSolve', {
-            detail: { grid: msg.grid, status: msg.status }
-          }));
+          if (slotId !== 'parent_slot') {
+            console.log(`[P2P Proxy] Relaying solve from downstream client ${msg.senderId || directSenderId} to Host.`);
+            if (!msg.senderId) msg.senderId = directSenderId;
+            sendToHost(msg);
+          } else {
+            window.dispatchEvent(new CustomEvent('sudoku:externalSolve', {
+              detail: { grid: msg.grid, status: msg.status }
+            }));
+          }
         }
         break;
 
       case 'focus':
+        if (!isHost && slotId !== 'parent_slot') {
+          console.log(`[P2P Proxy] Relaying focus from downstream client ${msg.senderId || directSenderId} to Host.`);
+          if (!msg.senderId) msg.senderId = directSenderId;
+          sendToHost(msg);
+          break;
+        }
+        const actualSenderId = msg.senderId || directSenderId;
+        if (isHost) {
+          relayMessageToAll({
+            type: 'focus',
+            cellIndex: msg.cellIndex,
+            senderId: actualSenderId,
+            color: msg.color,
+            nickname: msg.nickname
+          }, actualSenderId);
+        }
+        
+        // Find player color/name
+        const player = activePlayers.find(p => p.playerId === actualSenderId);
         window.dispatchEvent(new CustomEvent('sudoku:externalFocus', {
           detail: {
             cellIndex: msg.cellIndex,
-            playerId: senderId,
-            color: msg.color,
-            nickname: msg.nickname
+            playerId: actualSenderId,
+            color: player ? player.color : msg.color,
+            nickname: player ? player.nickname : msg.nickname
           }
         }));
         break;
@@ -321,13 +563,112 @@
     }
   }
 
-  // 10. Send Helpers
+  // Network Route Forwarding Utilities
+  function sendToHost(payload) {
+    if (!payload.msgId) {
+      payload.msgId = myPeerId + "_" + (++messageSeq);
+    }
+    seenMessages.add(payload.msgId);
+
+    if (!isHost && !payload.senderId) {
+      payload.senderId = myPeerId;
+    }
+
+    if (primaryRouteSlotId && slots[primaryRouteSlotId] && slots[primaryRouteSlotId].dc) {
+      sendDirectMessage(slots[primaryRouteSlotId].dc, payload);
+    } else {
+      console.warn('[P2P Route] Attempted to send to host, but no active primary path.');
+    }
+  }
+
+  function sendToPeer(targetPeerId, payload) {
+    if (targetPeerId === 'host') {
+      sendToHost(payload);
+      return;
+    }
+    // If we are Host, check direct slots or proxies
+    if (isHost) {
+      // 1. Direct slot match
+      for (const sid in slots) {
+        if (slots[sid].clientInfo && slots[sid].clientInfo.peerId === targetPeerId) {
+          if (slots[sid].dc && slots[sid].dc.readyState === 'open') {
+            sendDirectMessage(slots[sid].dc, payload);
+            return;
+          }
+        }
+      }
+      // 2. Proxied routing
+      const proxyId = proxiedPeers[targetPeerId];
+      if (proxyId) {
+        for (const sid in slots) {
+          if (slots[sid].clientInfo && slots[sid].clientInfo.peerId === proxyId) {
+            if (slots[sid].dc && slots[sid].dc.readyState === 'open') {
+              sendDirectMessage(slots[sid].dc, {
+                type: 'proxy-message',
+                targetPeerId: targetPeerId,
+                payload: payload
+              });
+              return;
+            }
+          }
+        }
+      }
+    } else {
+      // Client relays everything down-link or to Host
+      // 1. Down-link child match
+      for (const sid in slots) {
+        if (slots[sid].clientInfo && slots[sid].clientInfo.peerId === targetPeerId) {
+          if (slots[sid].dc && slots[sid].dc.readyState === 'open') {
+            sendDirectMessage(slots[sid].dc, payload);
+            return;
+          }
+        }
+      }
+      // 2. Otherwise forward up-link to Host as proxy wrapper
+      sendToHost({
+        type: 'proxy-message',
+        targetPeerId: targetPeerId,
+        payload: payload
+      });
+    }
+  }
+
+  // Sends messages to direct neighbors (split horizon)
+  function broadcastMessage(payload, excludeSlotId) {
+    if (!payload.msgId) {
+      payload.msgId = myPeerId + "_" + (++messageSeq);
+    }
+    seenMessages.add(payload.msgId);
+
+    // If client, we also inject sender details so proxy routing works
+    if (!isHost && !payload.senderId) {
+      payload.senderId = myPeerId;
+    }
+
+    for (const sid in slots) {
+      if (sid !== excludeSlotId && slots[sid].dc && slots[sid].dc.readyState === 'open') {
+        sendDirectMessage(slots[sid].dc, payload);
+      }
+    }
+  }
+
+  // Relays changes from Host to all connected clients
+  function relayMessageToAll(payload, excludeSenderId) {
+    if (!payload.msgId) {
+      payload.msgId = myPeerId + "_" + (++messageSeq);
+    }
+    seenMessages.add(payload.msgId);
+    
+    activePlayers.forEach(p => {
+      if (p.playerId !== myPeerId && p.playerId !== excludeSenderId) {
+        sendToPeer(p.playerId, payload);
+      }
+    });
+  }
+
   function sendDirectMessage(channel, payload) {
     if (channel && channel.readyState === 'open') {
       try {
-        if (payload.type !== 'heartbeat') {
-          console.log(`[P2P Send] Type: ${payload.type}`);
-        }
         channel.send(JSON.stringify(payload));
       } catch (e) {
         console.error('[P2P Send] Write error:', e);
@@ -335,87 +676,178 @@
     }
   }
 
-  function broadcastMessage(payload) {
-    if (dc) {
-      sendDirectMessage(dc, payload);
+  // Player Registration
+  function registerActivePlayer(playerInfo) {
+    const exists = activePlayers.some(p => p.playerId === playerInfo.playerId);
+    if (!exists) {
+      activePlayers.push(playerInfo);
+    } else {
+      activePlayers = activePlayers.map(p => p.playerId === playerInfo.playerId ? playerInfo : p);
     }
   }
 
-  function updateActivePlayers() {
-    activePlayers = [{
-      playerId: myPeerId,
-      nickname: myNickname,
-      color: myColor,
-      isHost
-    }];
+  function broadcastPlayersList() {
+    relayMessageToAll({
+      type: 'players-sync',
+      players: activePlayers
+    });
   }
 
-  // Periodic Keep-alives
+  // Slot Disconnection Teardown & Failover Routing
+  function handleSlotClosed(slotId) {
+    const slot = slots[slotId];
+    if (!slot) return;
+    
+    console.log(`[P2P Teardown][${slotId}] Cleaning connection resources.`);
+    try { slot.dc.close(); } catch(e) {}
+    try { slot.pc.close(); } catch(e) {}
+
+    const disconnectedPeerId = slot.clientInfo ? slot.clientInfo.peerId : null;
+    delete slots[slotId];
+
+    if (isHost) {
+      if (disconnectedPeerId) {
+        // Clean direct active player
+        activePlayers = activePlayers.filter(p => p.playerId !== disconnectedPeerId);
+        
+        // Clean downstream proxied connections of this peer
+        for (const pid in proxiedPeers) {
+          if (proxiedPeers[pid] === disconnectedPeerId) {
+            activePlayers = activePlayers.filter(p => p.playerId !== pid);
+            delete proxiedPeers[pid];
+          }
+        }
+        broadcastPlayersList();
+      }
+      updateUIStatus(Object.keys(slots).length > 0 ? 'connected' : 'disconnected');
+    } else {
+      // If we are a Client, check if this was our route to the Host
+      if (slotId === primaryRouteSlotId) {
+        primaryRouteSlotId = null;
+        
+        // FAILOVER: Scan if we have another active connection slot (e.g. backup link)
+        console.log('[P2P Failover] Primary route lost! Searching backup paths...');
+        for (const sid in slots) {
+          if (slots[sid].status === 'connected' && slots[sid].dc && slots[sid].dc.readyState === 'open') {
+            primaryRouteSlotId = sid;
+            console.log(`[P2P Failover] Route re-routed through backup slot: ${sid}`);
+            break;
+          }
+        }
+      } else {
+        // If we are Client and this was a downstream connection slot
+        if (disconnectedPeerId && slotId !== 'parent_slot') {
+          console.log(`[P2P Proxy] Downstream client ${disconnectedPeerId} disconnected. Deregistering from Host.`);
+          sendToHost({
+            type: 'proxy-deregister',
+            peerId: disconnectedPeerId
+          });
+        }
+      }
+
+      const hasHostRoute = primaryRouteSlotId !== null;
+      updateUIStatus(hasHostRoute ? 'connected' : 'disconnected');
+    }
+  }
+
+  // Periodic Keepalive Heatbeats
   setInterval(() => {
     broadcastMessage({ type: 'heartbeat' });
   }, 5000);
 
+  // cleanup whole local engine
   function cleanup() {
-    console.log('[P2P Connection] Cleaning up local links...');
-    if (dc) { dc.close(); dc = null; }
-    if (pc) { pc.close(); pc = null; }
+    console.log('[P2P Connection] Terminating all mesh links...');
+    for (const sid in slots) {
+      try { slots[sid].dc.close(); } catch(e) {}
+      try { slots[sid].pc.close(); } catch(e) {}
+    }
+    slots = {};
+    proxiedPeers = {};
+    primaryRouteSlotId = null;
     document.querySelectorAll('[class^="peer-highlight-"]').forEach(el => el.remove());
     updateUIStatus('disconnected');
   }
+  window.p2pCleanup = cleanup;
 
-  // 11. Binds triggers from sudoku app.js
+  // Binds triggers from sudoku app.js
   window.addEventListener('sudoku:p2pSendMove', (e) => {
-    broadcastMessage({
+    const payload = {
       type: 'move',
       cellIndex: e.detail.cellIndex,
       value: e.detail.value,
       grid: e.detail.grid,
       status: e.detail.status
-    });
+    };
+    if (isHost) {
+      relayMessageToAll(payload, myPeerId);
+    } else {
+      sendToHost(payload);
+    }
   });
 
   window.addEventListener('sudoku:p2pSendSolve', (e) => {
-    broadcastMessage({
+    const payload = {
       type: 'solve',
       grid: e.detail.grid,
       status: e.detail.status
-    });
+    };
+    if (isHost) {
+      relayMessageToAll(payload, myPeerId);
+    } else {
+      sendToHost(payload);
+    }
   });
 
   window.addEventListener('sudoku:p2pSendFocus', (e) => {
-    broadcastMessage({
+    const payload = {
       type: 'focus',
       cellIndex: e.detail.cellIndex,
       color: myColor,
       nickname: myNickname
-    });
+    };
+    if (isHost) {
+      relayMessageToAll(payload, myPeerId);
+    } else {
+      sendToHost(payload);
+    }
   });
 
   window.addEventListener('sudoku:p2pSyncRequested', (e) => {
-    sendDirectMessage(dc, {
+    const payload = {
       type: 'state-sync',
       initialGrid: e.detail.initialGrid,
       currentGrid: e.detail.currentGrid,
       status: e.detail.status
-    });
+    };
+    if (e.detail.recipientId === 'host') {
+      sendToHost(payload);
+    } else {
+      sendToPeer(e.detail.recipientId, payload);
+    }
   });
 
   window.addEventListener('sudoku:submitManualToken', (e) => {
-    applyClientAnswer(e.detail.token);
+    applyClientAnswer(e.detail.token, e.detail.slotId);
   });
 
-  window.addEventListener('sudoku:triggerManualOffer', () => {
-    setupWebRTC();
+  window.addEventListener('sudoku:triggerManualOffer', (e) => {
+    setupWebRTC(e.detail.slotId);
   });
 
-  // Automatically start gathering on load if we have a hash offer (Client flow)
+  // Client startup check
   if (hasOfferInHash) {
     console.log('[P2P Setup] Offer found in URL hash. Starting Client setup...');
-    // Give app.js a fraction of a second to bind its event listeners first
-    setTimeout(setupWebRTC, 100);
+    setTimeout(() => {
+      try {
+        const decoded = JSON.parse(atob(hashParams.offer));
+        setupWebRTC('parent_slot', decoded);
+      } catch (err) {
+        console.error('[P2P Setup] Failed to decode hash offer:', err);
+      }
+    }, 100);
   } else {
-    // Host waits for the user to click "Generate Offer URL" or we can start automatically
-    console.log('[P2P Setup] Ready to host. Click "Generate Connection Link" to begin.');
+    console.log('[P2P Setup] Ready to host. Add slot and copy URL to invite players.');
   }
 
 })();
