@@ -227,8 +227,25 @@
     const slot = slots[slotId];
     if (!slot) return;
 
+    let minifiedSdp = slot.pc.localDescription.sdp || '';
+    if (minifiedSdp) {
+      minifiedSdp = minifiedSdp.split('\r\n')
+        .filter(line => {
+          if (!line.trim()) return false;
+          if (line.startsWith('a=candidate:') && line.includes(' tcp ')) return false;
+          if (line.startsWith('a=extmap-allow-mixed')) return false;
+          if (line.startsWith('a=msid-semantic:')) return false;
+          return true;
+        })
+        .join('\r\n');
+      if (!minifiedSdp.endsWith('\r\n')) minifiedSdp += '\r\n';
+    }
+
     const sdpToken = btoa(JSON.stringify({
-      sdp: slot.pc.localDescription,
+      sdp: {
+        type: slot.pc.localDescription.type,
+        sdp: minifiedSdp
+      },
       slotId: slotId,
       peerId: myPeerId,
       nickname: myNickname,
