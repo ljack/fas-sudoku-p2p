@@ -256,10 +256,10 @@
       // We are the initiator (either Host or a client creating a proxy link)
       const grid = window.sudokuInitialGrid || hashParams.grid || '';
       
-      let shareURL = `${window.location.origin}${window.location.pathname}#gameId=${gameId}&grid=${grid}&offer=${sdpToken}&slotId=${slotId}`;
+      let shareURL = `${window.location.origin}${window.location.pathname}#gameId=${encodeURIComponent(gameId)}&grid=${encodeURIComponent(grid)}&offer=${encodeURIComponent(sdpToken)}&slotId=${encodeURIComponent(slotId)}`;
       if (!isHost) {
         // If client is acting as a proxy, append proxy parameter
-        shareURL += `&proxyPeerId=${myPeerId}`;
+        shareURL += `&proxyPeerId=${encodeURIComponent(myPeerId)}`;
       }
 
       // Auto slot offers are tunneled via data channel, not manually copy-pasted
