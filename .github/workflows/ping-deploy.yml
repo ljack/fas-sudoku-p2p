@@ -1,0 +1,30 @@
+name: Ping on Pages Deployment
+
+on:
+  workflow_run:
+    workflows: ["pages-build-deployment"]
+    types:
+      - completed
+
+jobs:
+  ping-webhook:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Send Post-Deployment Ping
+        run: |
+          if [ -z "${{ secrets.DEPLOY_PING_URL }}" ]; then
+            echo "DEPLOY_PING_URL secret is not set. Skipping ping."
+            exit 0
+          fi
+          REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"event\": \"pages_deployed\",
+              \"status\": \"success\",
+              \"repository\": \"${{ github.repository }}\",
+              \"run_id\": \"${{ github.event.workflow_run.id }}\",
+              \"url\": \"https://${{ github.repository_owner }}.github.io/${REPO_NAME}/\"
+            }" \
+            "${{ secrets.DEPLOY_PING_URL }}"
