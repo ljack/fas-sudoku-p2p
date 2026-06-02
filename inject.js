@@ -217,6 +217,9 @@
       isAuto: slotId.startsWith('auto_')
     };
 
+    let gatheringCompleteCalled = false;
+    let gatheringTimeout = null;
+
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         inspectCandidate(event.candidate.candidate);
@@ -226,7 +229,11 @@
     pc.onicegatheringstatechange = () => {
       console.log(`[ICE Gathering][${slotId}] State changed to: ${pc.iceGatheringState}`);
       if (pc.iceGatheringState === 'complete') {
-        onIceGatheringComplete(slotId);
+        if (!gatheringCompleteCalled) {
+          gatheringCompleteCalled = true;
+          if (gatheringTimeout) clearTimeout(gatheringTimeout);
+          onIceGatheringComplete(slotId);
+        }
       }
     };
 
@@ -262,6 +269,15 @@
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+
+        // Start safety timeout for ICE gathering (4 seconds)
+        gatheringTimeout = setTimeout(() => {
+          if (!gatheringCompleteCalled) {
+            gatheringCompleteCalled = true;
+            console.log(`[ICE Gathering][${slotId}] Gathering timed out (4s), proceeding with current candidates.`);
+            onIceGatheringComplete(slotId);
+          }
+        }, 4000);
       } catch (err) {
         console.error(`[P2P Setup][${slotId}] Offer application failed:`, err);
         slots[slotId].status = 'disconnected';
@@ -279,6 +295,15 @@
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+
+        // Start safety timeout for ICE gathering (4 seconds)
+        gatheringTimeout = setTimeout(() => {
+          if (!gatheringCompleteCalled) {
+            gatheringCompleteCalled = true;
+            console.log(`[ICE Gathering][${slotId}] Gathering timed out (4s), proceeding with current candidates.`);
+            onIceGatheringComplete(slotId);
+          }
+        }, 4000);
       } catch (err) {
         console.error(`[P2P Setup][${slotId}] Offer creation failed:`, err);
         slots[slotId].status = 'disconnected';
