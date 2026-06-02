@@ -1060,6 +1060,10 @@
     }, 100);
   } else {
     console.log('[P2P Setup] Ready to host. Add slot and copy URL to invite players.');
+    // Pre-generate slot_1 invite link on Host startup to save manual connection setup time
+    setTimeout(() => {
+      setupWebRTC('slot_1');
+    }, 500);
   }
 
 })();
