@@ -503,6 +503,25 @@ function renderSlotQRCode(text) {
       console.log("⚠️ QRCode script not loaded.");
     }
   }
+
+  const qrLargeDiv = document.getElementById("qrcode-large");
+  if (qrLargeDiv) {
+    qrLargeDiv.innerHTML = "";
+    if (typeof QRCode !== 'undefined') {
+      try {
+        new QRCode(qrLargeDiv, {
+          text: text,
+          width: 360,
+          height: 360,
+          colorDark : "#000000",
+          colorLight : "#ffffff",
+          correctLevel : QRCode.CorrectLevel.H
+        });
+      } catch (qrErr) {
+        console.error("Error creating large QR Code:", qrErr);
+      }
+    }
+  }
 }
 
 function refreshActiveSlotUI() {
@@ -1072,6 +1091,34 @@ if (btnCopyLocal) {
     } catch (err) {
       console.error("Failed to copy text:", err);
       alert("Failed to copy. Please manually select the text box and copy it.");
+    }
+  });
+}
+
+// Setup QR code modal enlarge listener
+const qrcodeElement = document.getElementById("qrcode");
+const qrcodeModal = document.getElementById("qrcode-modal");
+const qrcodeModalClose = document.getElementById("qrcode-modal-close");
+const qrcodeContainerSpan = qrcodeContainer ? qrcodeContainer.querySelector("span") : null;
+
+if (qrcodeElement && qrcodeModal) {
+  const openModal = () => {
+    qrcodeModal.classList.remove('hidden');
+  };
+  qrcodeElement.addEventListener('click', openModal);
+  if (qrcodeContainerSpan) {
+    qrcodeContainerSpan.addEventListener('click', openModal);
+  }
+
+  qrcodeModal.addEventListener('click', (e) => {
+    if (e.target === qrcodeModal || e.target === qrcodeModalClose || e.target.closest('#qrcode-modal-close')) {
+      qrcodeModal.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !qrcodeModal.classList.contains('hidden')) {
+      qrcodeModal.classList.add('hidden');
     }
   });
 }
