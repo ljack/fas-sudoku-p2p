@@ -61,6 +61,7 @@ let hashParams = {};
 let hasOfferInHash = false;
 let isHost = true;
 let gameId = '';
+let latestP2PStatus = null;
 
 let initialGrid = "";
 let currentGrid = "";
@@ -509,58 +510,134 @@ function refreshActiveSlotUI() {
   const tokens = slotTokens[sid] || { local: '', remote: '' };
   console.log(`[E2E Debug APP] refreshActiveSlotUI: activeSlotId=${p2pActiveSlotId}, sid=${sid}, tokens=`, tokens);
   
-  localSdpText.value = tokens.local || '';
-  remoteSdpText.value = tokens.remote || '';
+  // Find current slot state from latestP2PStatus
+  const slotDetails = (latestP2PStatus && latestP2PStatus.slots) ? latestP2PStatus.slots[sid] : null;
+  const slotStatus = slotDetails ? slotDetails.status : 'disconnected';
+  const slotNickname = slotDetails ? slotDetails.nickname : '';
 
-  if (tokens.local) {
-    if (btnCopyLocal) btnCopyLocal.classList.remove('hidden');
-    if (tokens.local.startsWith('http') || tokens.local.includes('#gameId=')) {
-      if (qrcodeContainer) qrcodeContainer.classList.remove('hidden');
-      setTimeout(() => {
-        renderSlotQRCode(tokens.local);
-      }, 50);
-    } else {
-      if (qrcodeContainer) qrcodeContainer.classList.add('hidden');
+  const manualSplit = document.querySelector('.manual-split');
+  const connState = document.getElementById('manual-connected-state');
+
+  // 1. If slot is connected, show the active connection block and hide inputs
+  if (slotStatus === 'connected') {
+    if (manualSplit) manualSplit.classList.add('hidden');
+    if (connState) {
+      connState.classList.remove('hidden');
+      const connDesc = document.getElementById('connected-state-desc');
+      if (connDesc) {
+        connDesc.textContent = isHost 
+          ? `Player "${slotNickname || 'Peer'}" is connected to this slot (${sid.toUpperCase()}).`
+          : (sid === 'parent_slot' 
+              ? `Connected to the Host server lobby!` 
+              : `Player "${slotNickname || 'Child Peer'}" is connected via this relay slot (${sid.toUpperCase()}).`);
+      }
     }
-    if (btnManualOffer) btnManualOffer.textContent = "Regenerate Token";
-  } else {
-    if (btnCopyLocal) btnCopyLocal.classList.add('hidden');
-    if (qrcodeContainer) qrcodeContainer.classList.add('hidden');
-    if (btnManualOffer) btnManualOffer.textContent = "Generate Token";
+    return;
   }
+
+  // 2. Otherwise, slot is not connected, so show normal inputs and hide success block
+  if (manualSplit) manualSplit.classList.remove('hidden');
+  if (connState) connState.classList.add('hidden');
 
   const leftTitle = document.getElementById('left-title');
   const leftDesc = document.getElementById('left-desc');
   const rightTitle = document.getElementById('right-title');
   const rightDesc = document.getElementById('right-desc');
 
+  // Handle Left Column (Offer/Link generation) depending on status
+  if (slotStatus === 'gathering') {
+    localSdpText.value = "Gathering local network interfaces & generating manual offer token...\n(This might take up to 5 seconds depending on STUN servers and local network interfaces)";
+    if (leftDesc) leftDesc.textContent = "Network discovery is running. Please wait for the token to compile...";
+    if (btnCopyLocal) btnCopyLocal.classList.add('hidden');
+    if (qrcodeContainer) qrcodeContainer.classList.add('hidden');
+    if (btnManualOffer) {
+      btnManualOffer.disabled = true;
+      btnManualOffer.textContent = "Gathering routes...";
+    }
+  } else {
+    localSdpText.value = tokens.local || '';
+    if (btnManualOffer) {
+      btnManualOffer.disabled = false;
+      btnManualOffer.textContent = tokens.local ? "Regenerate Token" : "Generate Token";
+    }
+
+    if (tokens.local) {
+      if (btnCopyLocal) btnCopyLocal.classList.remove('hidden');
+      if (tokens.local.startsWith('http') || tokens.local.includes('#gameId=')) {
+        if (qrcodeContainer) qrcodeContainer.classList.remove('hidden');
+        setTimeout(() => {
+          renderSlotQRCode(tokens.local);
+        }, 50);
+      } else {
+        if (qrcodeContainer) qrcodeContainer.classList.add('hidden');
+      }
+    } else {
+      if (btnCopyLocal) btnCopyLocal.classList.add('hidden');
+      if (qrcodeContainer) qrcodeContainer.classList.add('hidden');
+    }
+
+    if (isHost) {
+      if (leftDesc) {
+        leftDesc.textContent = tokens.local 
+          ? "Copy this link or scan the QR Code below to invite a player."
+          : "Click 'Generate Token' to create a link for this peer slot.";
+      }
+    } else {
+      if (sid === 'parent_slot') {
+        if (leftDesc) leftDesc.textContent = "Provide this token back to the Host browser to complete manual pairing.";
+      } else {
+        if (leftDesc) {
+          leftDesc.textContent = tokens.local
+            ? "Share this link with the child player."
+            : "Click 'Generate Token' and share this link with the child player.";
+        }
+      }
+    }
+  }
+
+  // Handle Titles and Right Column (Apply Answer/Offer) depending on status
   if (isHost) {
     if (leftTitle) leftTitle.textContent = "1. Invite Link for " + (sid.startsWith('auto_') ? 'Auto Backup' : sid.toUpperCase());
-    if (leftDesc) {
-      leftDesc.textContent = tokens.local 
-        ? "Copy this link or scan the QR Code below to invite a player."
-        : "Click 'Generate Token' to create a link for this peer slot.";
-    }
-    
     if (rightTitle) rightTitle.textContent = "2. Paste Answer from " + (sid.startsWith('auto_') ? 'Auto Backup' : sid.toUpperCase());
-    if (rightDesc) rightDesc.textContent = "Paste the answer token from the joining client below.";
+    
+    if (slotStatus === 'connecting') {
+      if (btnManualConnect) {
+        btnManualConnect.disabled = true;
+        btnManualConnect.textContent = "Connecting...";
+      }
+      if (rightDesc) rightDesc.textContent = "Establishing direct peer-to-peer data channel...";
+    } else {
+      if (btnManualConnect) {
+        btnManualConnect.disabled = false;
+        btnManualConnect.textContent = "Connect to Peer";
+      }
+      if (rightDesc) rightDesc.textContent = "Paste the answer token from the joining client below.";
+    }
+    remoteSdpText.value = tokens.remote || '';
   } else {
     if (sid === 'parent_slot') {
       if (leftTitle) leftTitle.textContent = "1. Host Answer Token";
-      if (leftDesc) leftDesc.textContent = "Provide this token back to the Host browser to complete manual pairing.";
-      
       if (rightTitle) rightTitle.textContent = "2. Host Remote Offer";
       if (rightDesc) rightDesc.textContent = "Your client loads the offer parameters automatically from the link hash.";
+      remoteSdpText.value = tokens.remote || '';
     } else {
       if (leftTitle) leftTitle.textContent = "1. Proxy Invite Link for " + sid.toUpperCase();
-      if (leftDesc) {
-        leftDesc.textContent = tokens.local
-          ? "Share this link with the child player."
-          : "Click 'Generate Token' and share this link with the child player.";
-      }
-      
       if (rightTitle) rightTitle.textContent = "2. Paste Answer for " + sid.toUpperCase();
-      if (rightDesc) rightDesc.textContent = "Paste the answer token generated by the child client below.";
+      
+      if (slotStatus === 'connecting') {
+        if (btnManualConnect) {
+          btnManualConnect.disabled = true;
+          btnManualConnect.textContent = "Connecting...";
+        }
+        if (rightDesc) rightDesc.textContent = "Establishing relayed data channel connection...";
+      } else {
+        if (btnManualConnect) {
+          btnManualConnect.disabled = false;
+          btnManualConnect.textContent = "Connect to Peer";
+        }
+        if (rightDesc) rightDesc.textContent = "Paste the answer token generated by the child client below.";
+      }
+      remoteSdpText.value = tokens.remote || '';
     }
   }
 }
@@ -611,6 +688,7 @@ btnManualConnect.addEventListener('click', () => {
 // Update diagnostic status panel and tabs
 window.addEventListener('sudoku:p2pStatus', (e) => {
   const detail = e.detail;
+  latestP2PStatus = detail;
   console.log('[E2E Debug APP] received sudoku:p2pStatus event status:', detail.status, 'detail:', detail);
   
   // Set badge text
@@ -793,6 +871,8 @@ window.addEventListener('sudoku:p2pStatus', (e) => {
   if (detail.extra) {
     logDiagnostic(detail.extra);
   }
+
+  refreshActiveSlotUI();
 });
 
 // Handle Host offer ready
