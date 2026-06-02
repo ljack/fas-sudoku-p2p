@@ -123,9 +123,21 @@
   console.log(`[P2P Profile] Peer ID: ${myPeerId} (${isHost ? 'Host' : 'Client'}), Nickname: ${myNickname}`);
 
 
-  // WebRTC Stun config
+  // WebRTC ICE configuration with STUN and public TURN fallback
   const config = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:openrelay.metered.ca:80' },
+      {
+        urls: [
+          'turn:openrelay.metered.ca:80?transport=udp',
+          'turn:openrelay.metered.ca:80?transport=tcp',
+          'turn:openrelay.metered.ca:443?transport=tcp'
+        ],
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ]
   };
 
   let p2pStatus = 'disconnected';
@@ -144,7 +156,7 @@
   let messageSeq = 0;
   const seenMessages = new Set();
   let primaryRouteSlotId = null; // Client's primary route connection to the Host
-
+  
   // Update status and broadcast presence details to UI
   function updateUIStatus(statusText, extra = '') {
     p2pStatus = statusText;
@@ -270,14 +282,14 @@
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
-        // Start safety timeout for ICE gathering (4 seconds)
+        // Start safety timeout for ICE gathering (6 seconds to capture TURN candidates)
         gatheringTimeout = setTimeout(() => {
           if (!gatheringCompleteCalled) {
             gatheringCompleteCalled = true;
-            console.log(`[ICE Gathering][${slotId}] Gathering timed out (4s), proceeding with current candidates.`);
+            console.log(`[ICE Gathering][${slotId}] Gathering timed out (6s), proceeding with current candidates.`);
             onIceGatheringComplete(slotId);
           }
-        }, 4000);
+        }, 6000);
       } catch (err) {
         console.error(`[P2P Setup][${slotId}] Offer application failed:`, err);
         slots[slotId].status = 'disconnected';
@@ -296,14 +308,14 @@
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // Start safety timeout for ICE gathering (4 seconds)
+        // Start safety timeout for ICE gathering (6 seconds to capture TURN candidates)
         gatheringTimeout = setTimeout(() => {
           if (!gatheringCompleteCalled) {
             gatheringCompleteCalled = true;
-            console.log(`[ICE Gathering][${slotId}] Gathering timed out (4s), proceeding with current candidates.`);
+            console.log(`[ICE Gathering][${slotId}] Gathering timed out (6s), proceeding with current candidates.`);
             onIceGatheringComplete(slotId);
           }
-        }, 4000);
+        }, 6000);
       } catch (err) {
         console.error(`[P2P Setup][${slotId}] Offer creation failed:`, err);
         slots[slotId].status = 'disconnected';
