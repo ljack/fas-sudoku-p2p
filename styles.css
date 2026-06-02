@@ -418,29 +418,11 @@ footer {
   border-radius: 8px !important;
 }
 
-#qrcode {
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease;
-  transform-origin: center center;
-  position: relative;
-  z-index: 10;
-  cursor: zoom-in;
-}
-
-#qrcode:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.6) !important;
-}
-
-#qrcode img, #qrcode canvas {
-  display: block;
-  width: 160px !important;
-  height: 160px !important;
-  margin: 0 auto;
-}
-
 #qrcode-large img, #qrcode-large canvas {
   display: block;
-  width: 360px !important;
-  height: 360px !important;
+  width: 100% !important;
+  height: auto !important;
+  max-width: 512px !important;
+  max-height: 512px !important;
   margin: 0 auto;
 }

@@ -483,27 +483,6 @@ let p2pActiveSlotId = null;
 const slotTokens = {};
 
 function renderSlotQRCode(text) {
-  const qrDiv = document.getElementById("qrcode");
-  if (qrDiv) {
-    qrDiv.innerHTML = "";
-    if (typeof QRCode !== 'undefined') {
-      try {
-        new QRCode(qrDiv, {
-          text: text,
-          width: 160,
-          height: 160,
-          colorDark : "#000000",
-          colorLight : "#ffffff",
-          correctLevel : QRCode.CorrectLevel.M
-        });
-      } catch (qrErr) {
-        console.error("Error creating QR Code:", qrErr);
-      }
-    } else {
-      console.log("⚠️ QRCode script not loaded.");
-    }
-  }
-
   const qrLargeDiv = document.getElementById("qrcode-large");
   if (qrLargeDiv) {
     qrLargeDiv.innerHTML = "";
@@ -511,8 +490,8 @@ function renderSlotQRCode(text) {
       try {
         new QRCode(qrLargeDiv, {
           text: text,
-          width: 360,
-          height: 360,
+          width: 512,
+          height: 512,
           colorDark : "#000000",
           colorLight : "#ffffff",
           correctLevel : QRCode.CorrectLevel.H
@@ -520,6 +499,8 @@ function renderSlotQRCode(text) {
       } catch (qrErr) {
         console.error("Error creating large QR Code:", qrErr);
       }
+    } else {
+      console.log("⚠️ QRCode script not loaded.");
     }
   }
 }
@@ -1096,19 +1077,15 @@ if (btnCopyLocal) {
 }
 
 // Setup QR code modal enlarge listener
-const qrcodeElement = document.getElementById("qrcode");
+const btnShowQrcode = document.getElementById("btn-show-qrcode");
 const qrcodeModal = document.getElementById("qrcode-modal");
 const qrcodeModalClose = document.getElementById("qrcode-modal-close");
-const qrcodeContainerSpan = qrcodeContainer ? qrcodeContainer.querySelector("span") : null;
 
-if (qrcodeElement && qrcodeModal) {
+if (btnShowQrcode && qrcodeModal) {
   const openModal = () => {
     qrcodeModal.classList.remove('hidden');
   };
-  qrcodeElement.addEventListener('click', openModal);
-  if (qrcodeContainerSpan) {
-    qrcodeContainerSpan.addEventListener('click', openModal);
-  }
+  btnShowQrcode.addEventListener('click', openModal);
 
   qrcodeModal.addEventListener('click', (e) => {
     if (e.target === qrcodeModal || e.target === qrcodeModalClose || e.target.closest('#qrcode-modal-close')) {
