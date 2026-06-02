@@ -565,7 +565,7 @@ function refreshActiveSlotUI() {
 
   // Handle Left Column (Offer/Link generation) depending on status
   if (slotStatus === 'gathering') {
-    localSdpText.value = "Gathering local network interfaces & generating manual offer token...\n(This might take up to 5 seconds depending on STUN servers and local network interfaces)";
+    localSdpText.value = "Gathering local network interfaces & generating manual offer token...\n(This might take up to 60 seconds depending on STUN servers and interfaces, but will proceed automatically after a few seconds once candidates are received...)";
     if (leftDesc) leftDesc.textContent = "Network discovery is running. Please wait for the token to compile...";
     if (btnCopyLocal) btnCopyLocal.classList.add('hidden');
     if (qrcodeContainer) qrcodeContainer.classList.add('hidden');
